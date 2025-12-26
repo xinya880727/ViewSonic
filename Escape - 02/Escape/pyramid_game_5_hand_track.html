@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>古墓石碑：尋找失落的符號 (穩定手勢版)</title>
+    
+    <!-- 使用標準的 MediaPipe CDN 連結 -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Noto+Serif+TC:wght@400;700&display=swap');
+
+        :root {
+            --glass-size: 120px; 
+            --stone-bg: #2c241b;
+            --stone-light: #3e3226;
+            --symbol-hidden-opacity: 0;
+            --ui-gold: #d4af37;
+            --symbol-size: 30px; 
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1510;
+            font-family: 'Cinzel', 'Noto Serif TC', serif;
+            color: var(--ui-gold);
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            z-index: 100;
+            pointer-events: none;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            padding-bottom: 20px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.8rem;
+            letter-spacing: 2px;
+        }
+
+        #status {
+            font-size: 1.2rem;
+            margin-top: 5px;
+            color: #fff;
+        }
+
+        @media (min-width: 1024px) {
+            h1 { font-size: 3rem; }
+            #status { font-size: 1.8rem; }
+            #touch-hint { font-size: 1.5rem !important; bottom: 40px !important; }
+        }
+
+        #game-board {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: var(--stone-bg);
+            background-image: 
+                radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 100%),
+                url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.15'/%3E%3C/svg%3E");
+            cursor: none;
+        }
+
+        .symbol {
+            position: absolute;
+            width: var(--symbol-size);
+            height: var(--symbol-size);
+            transform: translate(-50%, -50%) rotate(0deg);
+            opacity: var(--symbol-hidden-opacity);
+            transition: opacity 0.1s ease, transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .symbol img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            opacity: 0.8; 
+            filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.8));
+            transition: opacity 0.1s ease;
+        }
+
+        .symbol.revealed {
+            opacity: 1;
+            filter: grayscale(0%) blur(0px);
+            transform: translate(-50%, -50%) scale(1.3) rotate(0deg) !important; 
+            z-index: 60; 
+        }
+
+        .symbol.found {
+            opacity: 1 !important;
+            filter: grayscale(0%) !important; 
+            transform: translate(-50%, -50%) scale(1.3) !important; 
+            z-index: 40; 
+        }
+        
+        .symbol.found img {
+            opacity: 1;
+            filter: none;
+        }
+
+        .symbol.found::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 160%;
+            height: 160%;
+            transform: translate(-50%, -50%);
+            background: radial-gradient(circle, rgba(255, 215, 0, 0.6) 0%, rgba(255, 215, 0, 0) 70%);
+            border-radius: 50%;
+            z-index: -1;
+            animation: pulseGlow 2s infinite;
+        }
+
+        @keyframes pulseGlow {
+            0% { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
+            50% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
+        }
+        
+        #magnifier {
+            position: absolute;
+            width: var(--glass-size);
+            height: var(--glass-size);
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            z-index: 100;
+            display: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border: none;
+        }
+
+        #magnifier-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain; 
+            z-index: 2; 
+            filter: drop-shadow(0 5px 10px rgba(0,0,0,0.5));
+        }
+
+        #magnifier-lens {
+            position: absolute;
+            width: 70%; 
+            height: 70%;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.2), rgba(255,255,255,0) 60%);
+            backdrop-filter: brightness(1.2) contrast(1.1);
+            z-index: 1; 
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            transition: background 0.2s, box-shadow 0.2s;
+        }
+
+        #magnifier.pinching #magnifier-lens {
+            background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.4), rgba(255,255,255,0.1) 60%);
+            transform: translate(-50%, -50%) scale(0.95);
+        }
+
+        #magnifier.error #magnifier-lens {
+            background: radial-gradient(circle, rgba(255, 20, 20, 0.6) 0%, rgba(255, 0, 0, 0) 70%);
+            box-shadow: 0 0 30px 5px rgba(255, 0, 0, 0.6); 
+        }
+        
+        #magnifier.error {
+            animation: shake 0.3s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        /* 虛擬游標 */
+        #virtual-cursor {
+            position: fixed;
+            width: 15px;
+            height: 15px;
+            background-color: rgba(255, 50, 50, 0.8);
+            border: 2px solid #fff;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 9999;
+            transform: translate(-50%, -50%);
+            display: none;
+            box-shadow: 0 0 10px rgba(255,0,0,0.8);
+            transition: background-color 0.2s;
+        }
+
+        /* 載入畫面與 Modal */
+        #loading-overlay, #modal {
+            display: flex;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 200;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            transition: opacity 0.5s;
+        }
+
+        #modal {
+            display: none;
+            background: rgba(0,0,0,0.85);
+        }
+        #modal.show {
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, #1a1510, #2c241b);
+            border: 2px solid var(--ui-gold);
+            padding: 40px;
+            border-radius: 10px;
+            text-align: center;
+            max-width: 80%;
+            box-shadow: 0 0 50px rgba(212, 175, 55, 0.2);
+            transform: scale(1);
+            transition: transform 0.3s;
+        }
+
+        .modal-title {
+            color: var(--ui-gold);
+            font-size: 2rem;
+            margin-bottom: 20px;
+        }
+
+        .modal-text {
+            color: #ccc;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .btn {
+            background: var(--ui-gold);
+            color: #1a1510;
+            border: none;
+            padding: 12px 30px;
+            font-size: 1.2rem;
+            font-family: inherit;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: all 0.2s;
+            margin: 10px;
+        }
+
+        .btn:hover {
+            background: #fff;
+            transform: scale(1.05);
+        }
+
+        /* 手動啟動按鈕 (預設隱藏，若自動失敗則顯示) */
+        #manual-start-btn {
+            display: none;
+            margin-top: 20px;
+            animation: pulse 1s infinite;
+        }
+
+        #touch-hint {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255,255,255,0.5);
+            font-size: 0.9rem;
+            pointer-events: none;
+            padding-top: 10px;
+        }
+
+        /* 攝影機視窗 */
+        #camera-container {
+            position: fixed;
+            top: 10px;       
+            right: 10px;     
+            width: 160px;    
+            height: 120px;
+            z-index: 150;
+            border: 2px solid var(--ui-gold); 
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+            display: none;
+            transform: scaleX(-1); 
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            opacity: 0.9; 
+        }
+        
+        #input_video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        #output_canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+        }
+
+        .loading-text {
+            color: var(--ui-gold);
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="game-board">
+        <div id="magnifier">
+            <div id="magnifier-lens"></div>
+            <img id="magnifier-img" src="" alt="Magnifying Glass">
+        </div>
+    </div>
+
+    <div id="virtual-cursor"></div>
+
+    <div id="ui-layer">
+        <h3>Examine the surrounding murals! </h3>​
+
+<h3>Find the markings that correspond with your clues—​</h3>​
+
+<h3>Complete Anubis's judgment, and break the Pharaoh's curse!​</h3>
+        <div id="status">找到線索: 0 / 4</div>
+    </div>
+
+    <div id="touch-hint">請在鏡頭前移動食指控制，捏合手指抓取答案</div>
+
+    <div id="camera-container">
+        <video id="input_video" playsinline></video>
+        <canvas id="output_canvas"></canvas>
+    </div>
+
+    <div id="loading-overlay">
+        <div class="loading-text" id="loading-msg">古老魔法啟動中...</div>
+        <div style="color: #888;">正在開啟攝影機</div>
+        <button id="manual-start-btn" class="btn" onclick="forceStartCamera()">點擊啟動古墓機關</button>
+    </div>
+
+    <div id="modal">
+        <div class="modal-content">
+            <div class="modal-title">封印已解開！</div>
+            <div class="modal-text">你成功找出了四個關鍵符號。<br>石門緩緩打開，金色的光芒照亮了前方的道路...</div>
+            <button class="btn" id="restart-btn" onclick="location.reload()">重新挑戰</button>
+        </div>
+    </div>
+
+    <script>
+        const magnifierSettings = {
+            image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='wood' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%238B4513;stop-opacity:1' /%3E%3Cstop offset='50%25' style='stop-color:%23A0522D;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%235D4037;stop-opacity:1' /%3E%3C/linearGradient%3E%3ClinearGradient id='gold' x1='0%25' y1='0%25' x2='0%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23FFD700;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%23DAA520;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3C!-- Handle --%3E%3Crect x='45' y='80' width='10' height='35' rx='3' transform='rotate(-45 50 80)' fill='url(%23wood)' stroke='%233E2723' stroke-width='1'/%3E%3C!-- Frame --%3E%3Ccircle cx='45' cy='45' r='38' fill='none' stroke='url(%23wood)' stroke-width='8' /%3E%3C!-- Inner Gold Ring --%3E%3Ccircle cx='45' cy='45' r='38' fill='none' stroke='url(%23gold)' stroke-width='2' opacity='0.8'/%3E%3C/svg%3E",
+            baseSize: 120, 
+            showLensEffect: true
+        };
+
+        const manualForbiddenZones = [];
+
+        // ★★★ 圖片設定區 ★★★
+        const correctAssets = [
+            { name: "正確1", normal: 'https://placehold.co/100x100/3e2723/8b7355?text=Ans1_Gray', found: 'https://placehold.co/100x100/d4af37/ffffff?text=Ans1_Color' },
+            { name: "正確2", normal: 'https://placehold.co/100x100/3e2723/8b7355?text=Ans2_Gray', found: 'https://placehold.co/100x100/d4af37/ffffff?text=Ans2_Color' },
+            { name: "正確3", normal: 'https://placehold.co/100x100/3e2723/8b7355?text=Ans3_Gray', found: 'https://placehold.co/100x100/d4af37/ffffff?text=Ans3_Color' },
+            { name: "正確4", normal: 'https://placehold.co/100x100/3e2723/8b7355?text=Ans4_Gray', found: 'https://placehold.co/100x100/d4af37/ffffff?text=Ans4_Color' },
+        ];
+
+        const distractorAssets = [
+            { name: "干擾1", normal: 'https://placehold.co/100x100/3e2723/555555?text=Bad1' },
+            { name: "干擾2", normal: 'https://placehold.co/100x100/3e2723/555555?text=Bad2' },
+            { name: "干擾3", normal: 'https://placehold.co/100x100/3e2723/555555?text=Bad3' },
+            { name: "干擾4", normal: 'https://placehold.co/100x100/3e2723/555555?text=Bad4' },
+            { name: "干擾5", normal: 'https://placehold.co/100x100/3e2723/555555?text=Bad5' },
+            { name: "干擾6", normal: 'https://placehold.co/100x100/3e2723/555555?text=Bad6' },
+            { name: "干擾7", normal: 'https://placehold.co/100x100/3e2723/555555?text=Bad7' },
+            { name: "干擾8", normal: 'https://placehold.co/100x100/3e2723/555555?text=Bad8' },
+            { name: "干擾9", normal: 'https://placehold.co/100x100/3e2723/555555?text=Bad9' },
+            { name: "干擾10", normal: 'https://placehold.co/100x100/3e2723/555555?text=Bad10' },
+        ];
+
+        const TOTAL_SYMBOLS = 20;
+        const TARGET_SYMBOLS_COUNT = 4;
+        const BASE_SYMBOL_SIZE = 30; 
+        
+        let foundCount = 0;
+        let isGameActive = false; 
+        let symbolsData = [];
+        let currentScale = 1.0;
+        let currentGlassSize = 120; 
+        let currentSymbolSize = 30; 
+
+        let hands = null;
+        let camera = null;
+        let isPinching = false;
+        let lastCursorX = window.innerWidth / 2;
+        let lastCursorY = window.innerHeight / 2;
+        
+        let canvasCtx = null;
+        let canvasElement = null;
+
+        const magnifier = document.getElementById('magnifier');
+        const magnifierImg = document.getElementById('magnifier-img');
+        const magnifierLens = document.getElementById('magnifier-lens');
+        const board = document.getElementById('game-board');
+        const statusEl = document.getElementById('status');
+        const modal = document.getElementById('modal');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const cameraContainer = document.getElementById('camera-container');
+        const virtualCursor = document.getElementById('virtual-cursor');
+        const manualStartBtn = document.getElementById('manual-start-btn');
+        const loadingMsg = document.getElementById('loading-msg');
+
+        function updateScale() {
+            const width = window.innerWidth;
+            if (width >= 1024) {
+                currentScale = 2.0;
+            } else {
+                currentScale = 1.0;
+            }
+            currentGlassSize = magnifierSettings.baseSize * currentScale;
+            currentSymbolSize = BASE_SYMBOL_SIZE * currentScale;
+            document.documentElement.style.setProperty('--glass-size', currentGlassSize + 'px');
+            document.documentElement.style.setProperty('--symbol-size', currentSymbolSize + 'px');
+            magnifierImg.src = magnifierSettings.image;
+            if (!magnifierSettings.showLensEffect) {
+                magnifierLens.style.display = 'none';
+            }
+        }
+
+        function getRandomPosition() {
+            const padding = 60 * currentScale; 
+            return {
+                x: padding + Math.random() * (window.innerWidth - padding * 2),
+                y: padding + Math.random() * (window.innerHeight - padding * 2)
+            };
+        }
+
+        function getForbiddenRects() {
+            let rects = [];
+            const uiElements = [document.getElementById('ui-layer'), document.getElementById('touch-hint')];
+            uiElements.forEach(el => {
+                if(el) {
+                    const r = el.getBoundingClientRect();
+                    rects.push({
+                        left: r.left - 20, top: r.top - 20, right: r.right + 20, bottom: r.bottom + 20
+                    });
+                }
+            });
+            return rects;
+        }
+
+        function isInForbiddenZone(x, y, rects) {
+            for (let r of rects) {
+                if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+            }
+            return false;
+        }
+
+        function initGame() {
+            updateScale();
+            const forbiddenRects = getForbiddenRects();
+            let usedPositions = [];
+
+            for (let i = 0; i < TOTAL_SYMBOLS; i++) {
+                const el = document.createElement('div');
+                el.classList.add('symbol');
+                
+                let asset;
+                let isTarget = false;
+                let foundImageSrc = ""; 
+
+                if (i < TARGET_SYMBOLS_COUNT) {
+                    asset = correctAssets[i]; 
+                    isTarget = true;
+                    el.innerHTML = `<img src="${asset.normal}" draggable="false" alt="${asset.name}">`;
+                    foundImageSrc = asset.found; 
+                } else {
+                    const randomIndex = Math.floor(Math.random() * distractorAssets.length);
+                    asset = distractorAssets[randomIndex];
+                    isTarget = false;
+                    el.innerHTML = `<img src="${asset.normal}" draggable="false" alt="${asset.name}">`;
+                }
+
+                let bestCandidate = null;
+                let bestDistance = -1;
+                const attempts = 500; 
+
+                for (let j = 0; j < attempts; j++) {
+                    const c = getRandomPosition();
+                    if (isInForbiddenZone(c.x, c.y, forbiddenRects)) continue;
+
+                    let minDistToNeighbor = Infinity;
+                    if (usedPositions.length === 0) {
+                        minDistToNeighbor = Infinity;
+                    } else {
+                        for (let pos of usedPositions) {
+                            const d = Math.hypot(c.x - pos.x, c.y - pos.y);
+                            if (d < minDistToNeighbor) minDistToNeighbor = d;
+                        }
+                    }
+
+                    if (minDistToNeighbor > bestDistance) {
+                        bestDistance = minDistToNeighbor;
+                        bestCandidate = c;
+                    }
+                }
+                
+                if (!bestCandidate) bestCandidate = getRandomPosition();
+                usedPositions.push(bestCandidate);
+                el.style.left = bestCandidate.x + 'px';
+                el.style.top = bestCandidate.y + 'px';
+                el.style.transform = `translate(-50%, -50%) rotate(0deg)`;
+                
+                board.appendChild(el);
+
+                symbolsData.push({
+                    id: i, element: el, x: bestCandidate.x, y: bestCandidate.y,
+                    isTarget: isTarget, foundImageSrc: foundImageSrc, found: false, baseRotation: 0
+                });
+            }
+
+            canvasElement = document.getElementById('output_canvas');
+            canvasCtx = canvasElement.getContext('2d');
+            
+            // 嘗試自動啟動
+            initHandsAndCamera();
+        }
+
+        function updateMagnifier(x, y) {
+            if (!isGameActive) {
+                magnifier.style.display = 'none'; 
+                virtualCursor.style.display = 'block'; 
+                virtualCursor.style.left = x + 'px';
+                virtualCursor.style.top = y + 'px';
+                return;
+            } else {
+                virtualCursor.style.display = 'none'; 
+            }
+            
+            x = Math.max(0, Math.min(window.innerWidth, x));
+            y = Math.max(0, Math.min(window.innerHeight, y));
+
+            magnifier.style.left = x + 'px';
+            magnifier.style.top = y + 'px';
+            magnifier.style.display = 'flex'; 
+
+            const detectRadius = currentGlassSize * 0.4; 
+            let closestSym = null;
+            let closestDist = Infinity;
+
+            symbolsData.forEach(sym => {
+                if (sym.found) return;
+                const dist = Math.hypot(x - sym.x, y - sym.y);
+                if (dist < detectRadius + 20 && dist < closestDist) {
+                    closestDist = dist;
+                    closestSym = sym;
+                }
+            });
+
+            let hasRevealed = false;
+            symbolsData.forEach(sym => {
+                if (sym.found) return;
+                if (sym === closestSym) {
+                    sym.element.classList.add('revealed');
+                    hasRevealed = true;
+                } else {
+                    sym.element.classList.remove('revealed');
+                }
+            });
+            
+            if (!hasRevealed && !closestSym) {
+                resetSymbolsState();
+            }
+        }
+
+        function triggerGlobalClick(x, y) {
+            if (isGameActive) {
+                handleInput(x, y);
+            } 
+            
+            magnifier.style.display = 'none';
+            virtualCursor.style.display = 'none';
+            
+            const element = document.elementFromPoint(x, y);
+            if (element) {
+                const clickEvent = new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window
+                });
+                element.dispatchEvent(clickEvent);
+                
+                if (element.classList.contains('btn')) {
+                    element.style.transform = 'scale(0.95)';
+                    setTimeout(() => element.style.transform = '', 100);
+                }
+            }
+            
+            if (isGameActive) {
+                magnifier.style.display = 'flex';
+            } else {
+                virtualCursor.style.display = 'block';
+            }
+        }
+
+        function handleInput(x, y) {
+            let clickedSymbol = null;
+            let minDist = Infinity;
+            const clickRadius = currentGlassSize * 0.35;
+
+            symbolsData.forEach(sym => {
+                const dist = Math.hypot(x - sym.x, y - sym.y);
+                if (dist < clickRadius) { 
+                    if (dist < minDist) {
+                        minDist = dist;
+                        clickedSymbol = sym;
+                    }
+                }
+            });
+
+            if (clickedSymbol) {
+                if (clickedSymbol.found) return;
+                if (clickedSymbol.isTarget) {
+                    triggerSuccess(clickedSymbol);
+                } else {
+                    triggerError();
+                }
+            }
+        }
+
+        function triggerSuccess(sym) {
+            sym.found = true;
+            sym.element.classList.add('found');
+            sym.element.classList.remove('revealed');
+            
+            const img = sym.element.querySelector('img');
+            if (img && sym.foundImageSrc) {
+                img.src = sym.foundImageSrc;
+            }
+
+            const flash = document.createElement('div');
+            flash.style.position = 'absolute';
+            flash.style.left = sym.x + 'px';
+            flash.style.top = sym.y + 'px';
+            flash.style.transform = 'translate(-50%, -50%)';
+            flash.style.width = '10px';
+            flash.style.height = '10px';
+            flash.style.borderRadius = '50%';
+            flash.style.backgroundColor = '#fff';
+            flash.style.boxShadow = '0 0 20px 10px #fff';
+            flash.style.opacity = '1';
+            flash.style.transition = 'all 0.5s';
+            flash.style.pointerEvents = 'none';
+            board.appendChild(flash);
+            
+            requestAnimationFrame(() => {
+                flash.style.opacity = '0';
+                flash.style.transform = 'translate(-50%, -50%) scale(5)';
+            });
+            setTimeout(() => flash.remove(), 500);
+
+            foundCount++;
+            statusEl.textContent = `找到線索: ${foundCount} / ${TARGET_SYMBOLS_COUNT}`;
+
+            if (foundCount === TARGET_SYMBOLS_COUNT) {
+                endGame();
+            }
+        }
+
+        function triggerError() {
+            magnifier.classList.add('error');
+            setTimeout(() => {
+                magnifier.classList.remove('error');
+            }, 500);
+        }
+
+        function endGame() {
+            isGameActive = false;
+            // 結束時保持攝影機開啟，以便點擊重來
+            setTimeout(() => {
+                modal.style.display = 'flex';
+                modal.offsetHeight; 
+                modal.classList.add('show');
+            }, 1000);
+        }
+
+        function resetSymbolsState() {
+            symbolsData.forEach(sym => {
+                if (!sym.found) {
+                    sym.element.classList.remove('revealed');
+                }
+            });
+        }
+
+        // ==========================================
+        //  AI 攝影機 (使用 MediaPipe Camera Utils)
+        // ==========================================
+
+        function initHandsAndCamera() {
+            hands = new Hands({locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }});
+            
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults(onHandResults);
+
+            const videoElement = document.getElementById('input_video');
+            
+            // 使用 MediaPipe Camera 工具，相容性較佳
+            camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({image: videoElement});
+                },
+                width: 640,
+                height: 480
+            });
+
+            // 嘗試啟動
+            camera.start()
+                .then(() => {
+                    cameraContainer.style.display = 'block';
+                    loadingOverlay.style.opacity = '0';
+                    setTimeout(() => loadingOverlay.style.display = 'none', 500);
+                    isGameActive = true;
+                    bindMouseEvents(); // 同時支援滑鼠
+                })
+                .catch(err => {
+                    console.warn("Auto-start failed:", err);
+                    loadingMsg.textContent = "請點擊按鈕以啟動";
+                    manualStartBtn.style.display = 'block';
+                });
+        }
+
+        // 手動強制啟動 (當自動播放被阻擋時)
+        function forceStartCamera() {
+            manualStartBtn.textContent = "啟動中...";
+            camera.start().then(() => {
+                cameraContainer.style.display = 'block';
+                loadingOverlay.style.opacity = '0';
+                setTimeout(() => loadingOverlay.style.display = 'none', 500);
+                isGameActive = true;
+                bindMouseEvents();
+            }).catch(err => {
+                alert("無法啟動攝影機，請檢查權限。將切換為滑鼠模式。");
+                loadingOverlay.style.display = 'none';
+                isGameActive = true;
+                bindMouseEvents();
+            });
+        }
+
+        function onHandResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#d4af37', lineWidth: 2}); 
+                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 3}); 
+
+                const indexTip = landmarks[8];
+                const x = (1 - indexTip.x) * window.innerWidth;
+                const y = indexTip.y * window.innerHeight;
+
+                const lerpFactor = 0.2;
+                lastCursorX = lastCursorX + (x - lastCursorX) * lerpFactor;
+                lastCursorY = lastCursorY + (y - lastCursorY) * lerpFactor;
+
+                updateMagnifier(lastCursorX, lastCursorY);
+
+                const thumbTip = landmarks[4];
+                const distance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+                const pinchThreshold = 0.05;
+
+                if (distance < pinchThreshold) {
+                    if (!isPinching) {
+                        isPinching = true;
+                        magnifier.classList.add('pinching');
+                        virtualCursor.style.backgroundColor = '#fff'; 
+                        triggerGlobalClick(lastCursorX, lastCursorY); 
+                    }
+                } else {
+                    isPinching = false;
+                    magnifier.classList.remove('pinching');
+                    virtualCursor.style.backgroundColor = 'rgba(255, 50, 50, 0.8)';
+                }
+            } else {
+                // 手部遺失：重置狀態
+                resetSymbolsState();
+            }
+            canvasCtx.restore();
+        }
+
+        function bindMouseEvents() {
+            window.addEventListener('mousemove', (e) => updateMagnifier(e.clientX, e.clientY));
+            window.addEventListener('click', (e) => handleInput(e.clientX, e.clientY));
+            window.addEventListener('touchmove', (e) => {
+                const t = e.touches[0]; updateMagnifier(t.clientX, t.clientY);
+            }, {passive: false});
+            window.addEventListener('touchstart', (e) => {
+                const t = e.touches[0]; updateMagnifier(t.clientX, t.clientY);
+            }, {passive: false});
+            window.addEventListener('touchend', (e) => {
+                const t = e.changedTouches[0]; handleInput(t.clientX, t.clientY);
+            });
+        }
+
+        window.addEventListener('resize', () => {
+            if(isGameActive) {
+                updateScale();
+            }
+        });
+
+        initGame();
+
+    </script>
+</body>
+</html>

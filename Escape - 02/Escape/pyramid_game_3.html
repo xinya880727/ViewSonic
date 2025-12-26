@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>古墓石碑：尋找失落的符號</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Noto+Serif+TC:wght@400;700&display=swap');
+
+        :root {
+            /* 基礎變數 - 這些會由 JS 動態調整以適應電腦/手機 */
+            --glass-size: 120px; 
+            --stone-bg: #2c241b;
+            --stone-light: #3e3226;
+            
+            /* ★設定為 0：未照到時完全隱形 */
+            --symbol-hidden-opacity: 0;
+            
+            --ui-gold: #d4af37;
+            
+            /* ★符號大小 30px */
+            --symbol-size: 30px; 
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1510;
+            font-family: 'Cinzel', 'Noto Serif TC', serif;
+            color: var(--ui-gold);
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none; /* 禁止滑動，專注遊戲 */
+        }
+
+        /* 介面層 */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            z-index: 100;
+            pointer-events: none;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            /* 避障區 */
+            padding-bottom: 20px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.8rem;
+            letter-spacing: 2px;
+        }
+
+        #status {
+            font-size: 1.2rem;
+            margin-top: 5px;
+            color: #fff;
+        }
+
+        /* RWD: 電腦版文字放大 */
+        @media (min-width: 1024px) {
+            h1 { font-size: 3rem; }
+            #status { font-size: 1.8rem; }
+            #touch-hint { font-size: 1.5rem !important; bottom: 40px !important; }
+        }
+
+        /* 遊戲區域 */
+        #game-board {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: var(--stone-bg);
+            /* 石碑紋理 */
+            background-image: 
+                radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 100%),
+                url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.15'/%3E%3C/svg%3E");
+            cursor: none; /* 隱藏滑鼠游標 */
+        }
+
+        /* 符號物件 */
+        .symbol {
+            position: absolute;
+            width: var(--symbol-size);
+            height: var(--symbol-size);
+            transform: translate(-50%, -50%);
+            opacity: var(--symbol-hidden-opacity);
+            /* 模糊淡入 */
+            filter: grayscale(100%) blur(2px);
+            transition: opacity 0.1s ease, filter 0.2s ease, transform 0.2s ease;
+            pointer-events: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* 圖片樣式 */
+        .symbol img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            opacity: 0.8; 
+            filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.8));
+        }
+
+        /* 顯示狀態：在放大鏡下 */
+        .symbol.revealed {
+            opacity: 1;
+            filter: grayscale(0%) blur(0px);
+            /* 稍微放大並轉正 */
+            transform: translate(-50%, -50%) scale(1.3) rotate(0deg) !important; 
+            z-index: 60; 
+        }
+
+        /* 找到狀態：正確答案 */
+        .symbol.found {
+            opacity: 1 !important;
+            filter: grayscale(0%) !important;
+            /* 明顯放大 */
+            transform: translate(-50%, -50%) scale(2.0) !important; 
+            z-index: 40; 
+        }
+        
+        .symbol.found img {
+            opacity: 1;
+            /* 金色光暈 */
+            filter: drop-shadow(0 0 8px #ffd700);
+        }
+        
+        /* =========================================
+           放大鏡結構
+           ========================================= */
+        #magnifier {
+            position: absolute;
+            width: var(--glass-size);
+            height: var(--glass-size);
+            pointer-events: none; /* 讓點擊穿透 */
+            transform: translate(-50%, -50%);
+            z-index: 100;
+            display: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            /* 確保沒有外框線 */
+            border: none;
+        }
+
+        /* 放大鏡框圖片 */
+        #magnifier-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain; 
+            z-index: 2; 
+            filter: drop-shadow(0 5px 10px rgba(0,0,0,0.5));
+        }
+
+        /* 鏡片效果 (發光/反光層) */
+        #magnifier-lens {
+            position: absolute;
+            width: 70%; 
+            height: 70%;
+            border-radius: 50%;
+            /* 平常是淡淡的反光 */
+            background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.2), rgba(255,255,255,0) 60%);
+            backdrop-filter: brightness(1.2) contrast(1.1);
+            z-index: 1; 
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            transition: background 0.2s, box-shadow 0.2s;
+        }
+
+        /* ★錯誤狀態：只有鏡片中間亮紅光暈，無邊框 */
+        #magnifier.error #magnifier-lens {
+            /* 紅色光暈 */
+            background: radial-gradient(circle, rgba(255, 20, 20, 0.6) 0%, rgba(255, 0, 0, 0) 70%);
+            /* 增加霧狀發光 */
+            box-shadow: 0 0 30px 5px rgba(255, 0, 0, 0.6); 
+        }
+        
+        #magnifier.error {
+            /* 震動動畫 */
+            animation: shake 0.3s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes shake {
+            10%, 90% { transform: translate(-52%, -50%); }
+            20%, 80% { transform: translate(-48%, -50%); }
+            30%, 50%, 70% { transform: translate(-54%, -50%); }
+            40%, 60% { transform: translate(-46%, -50%); }
+        }
+
+        /* Modal (勝利畫面) */
+        #modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 200;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+
+        #modal.show {
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, #1a1510, #2c241b);
+            border: 2px solid var(--ui-gold);
+            padding: 40px;
+            border-radius: 10px;
+            text-align: center;
+            max-width: 80%;
+            box-shadow: 0 0 50px rgba(212, 175, 55, 0.2);
+            transform: scale(0.8);
+            transition: transform 0.3s;
+        }
+
+        #modal.show .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-title {
+            color: var(--ui-gold);
+            font-size: 2rem;
+            margin-bottom: 20px;
+        }
+
+        .modal-text {
+            color: #ccc;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .btn {
+            background: var(--ui-gold);
+            color: #1a1510;
+            border: none;
+            padding: 12px 30px;
+            font-size: 1.2rem;
+            font-family: inherit;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: #fff;
+            transform: scale(1.05);
+        }
+
+        #touch-hint {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255,255,255,0.5);
+            font-size: 0.9rem;
+            pointer-events: none;
+            padding-top: 10px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="game-board">
+        <div id="magnifier">
+            <div id="magnifier-lens"></div>
+            <img id="magnifier-img" src="" alt="Magnifying Glass">
+        </div>
+    </div>
+
+    <!-- 上方標題區 -->
+    <div id="ui-layer">
+        <h1>古墓壁畫</h1>
+        <div id="status">找到線索: 0 / 4</div>
+    </div>
+
+    <!-- 下方提示區 -->
+    <div id="touch-hint">拖動放大鏡尋找符號，點擊以確認</div>
+
+    <!-- 勝利視窗 -->
+    <div id="modal">
+        <div class="modal-content">
+            <div class="modal-title">封印已解開！</div>
+            <div class="modal-text">你成功找出了四個關鍵符號。<br>石門緩緩打開，金色的光芒照亮了前方的道路...</div>
+            <button class="btn" onclick="location.reload()">重新挑戰</button>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        //  【設定區：放大鏡】
+        // ==========================================
+        const magnifierSettings = {
+            // ★ 請在此替換您的放大鏡圖片網址 (PNG 透明背景)
+            image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='wood' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%238B4513;stop-opacity:1' /%3E%3Cstop offset='50%25' style='stop-color:%23A0522D;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%235D4037;stop-opacity:1' /%3E%3C/linearGradient%3E%3ClinearGradient id='gold' x1='0%25' y1='0%25' x2='0%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23FFD700;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%23DAA520;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3C!-- Handle --%3E%3Crect x='45' y='80' width='10' height='35' rx='3' transform='rotate(-45 50 80)' fill='url(%23wood)' stroke='%233E2723' stroke-width='1'/%3E%3C!-- Frame --%3E%3Ccircle cx='45' cy='45' r='38' fill='none' stroke='url(%23wood)' stroke-width='8' /%3E%3C!-- Inner Gold Ring --%3E%3Ccircle cx='45' cy='45' r='38' fill='none' stroke='url(%23gold)' stroke-width='2' opacity='0.8'/%3E%3C/svg%3E",
+            
+            // 手機版基礎大小，電腦版會自動放大
+            baseSize: 120, 
+            showLensEffect: true
+        };
+
+        // ==========================================
+        //  【設定區：文字避讓】
+        // ==========================================
+        const manualForbiddenZones = [
+            // 若背景中間有文字，可取消註解並調整
+            // { left: 30, top: 40, width: 40, height: 20 }, 
+        ];
+
+        // ==========================================
+        //  【★ 圖片設定區 ★】
+        //  請在這裡貼上您自己的圖片網址！
+        // ==========================================
+        const customAssets = [
+            // --- 【正確答案區】 (陣列前 4 個) ---
+            // 請將 'content' 改為您的正確圖片網址
+            { name: "正確1", type: 'image', content: 'Escape_the_Pyramid_symbol07.svg' }, 
+            { name: "正確2", type: 'image', content: 'Escape_the_Pyramid_symbol17.svg' }, 
+            { name: "正確3", type: 'image', content: 'Escape_the_Pyramid_symbol18.svg' }, 
+            { name: "正確4", type: 'image', content: 'Escape_the_Pyramid_symbol03.svg' }, 
+            
+            // --- 【錯誤答案區】 (干擾圖片) ---
+            { name: "干擾1", type: 'image', content: 'Escape_the_Pyramid_symbol11.svg' }, 
+            { name: "干擾2", type: 'image', content: 'Escape_the_Pyramid_symbol15.svg' }, 
+            { name: "干擾3", type: 'image', content: 'Escape_the_Pyramid_symbol01.svg' }, 
+            { name: "干擾4", type: 'image', content: 'Escape_the_Pyramid_symbol06.svg' }, 
+            { name: "干擾5", type: 'image', content: 'Escape_the_Pyramid_symbol19.svg' }, 
+            { name: "干擾6", type: 'image', content: 'Escape_the_Pyramid_symbol13.svg' }, 
+            { name: "干擾7", type: 'image', content: 'Escape_the_Pyramid_symbol14.svg' }, 
+            { name: "干擾8", type: 'image', content: 'Escape_the_Pyramid_symbol16.svg' }, 
+            { name: "干擾9", type: 'image', content: 'Escape_the_Pyramid_symbol10.svg' }, 
+            { name: "干擾10", type: 'image', content: 'Escape_the_Pyramid_symbol09.svg' }, 
+        ];
+
+        // ==========================================
+        //  遊戲邏輯區
+        // ==========================================
+
+        const TOTAL_SYMBOLS = 20;
+        const TARGET_SYMBOLS_COUNT = 4;
+        const BASE_SYMBOL_SIZE = 30; // 基礎大小 30px
+        
+        let foundCount = 0;
+        let isGameActive = true;
+        let symbolsData = [];
+        
+        let currentScale = 1.0;
+        let currentGlassSize = 120; 
+        let currentSymbolSize = 30; 
+
+        const magnifier = document.getElementById('magnifier');
+        const magnifierImg = document.getElementById('magnifier-img');
+        const magnifierLens = document.getElementById('magnifier-lens');
+        const board = document.getElementById('game-board');
+        const statusEl = document.getElementById('status');
+        const modal = document.getElementById('modal');
+
+        // 計算並套用縮放比例
+        function updateScale() {
+            const width = window.innerWidth;
+            
+            // 電腦版 (寬度>1024) 自動放大 2 倍
+            if (width >= 1024) {
+                currentScale = 2.0;
+            } else {
+                currentScale = 1.0;
+            }
+
+            currentGlassSize = magnifierSettings.baseSize * currentScale;
+            currentSymbolSize = BASE_SYMBOL_SIZE * currentScale;
+
+            document.documentElement.style.setProperty('--glass-size', currentGlassSize + 'px');
+            document.documentElement.style.setProperty('--symbol-size', currentSymbolSize + 'px');
+            
+            magnifierImg.src = magnifierSettings.image;
+            if (!magnifierSettings.showLensEffect) {
+                magnifierLens.style.display = 'none';
+            }
+        }
+
+        function getRandomPosition() {
+            const padding = 60 * currentScale; 
+            return {
+                x: padding + Math.random() * (window.innerWidth - padding * 2),
+                y: padding + Math.random() * (window.innerHeight - padding * 2)
+            };
+        }
+
+        // 取得 UI 區域以便避開
+        function getForbiddenRects() {
+            let rects = [];
+            const uiElements = [document.getElementById('ui-layer'), document.getElementById('touch-hint')];
+            uiElements.forEach(el => {
+                if(el) {
+                    const r = el.getBoundingClientRect();
+                    rects.push({
+                        left: r.left - 20,
+                        top: r.top - 20,
+                        right: r.right + 20,
+                        bottom: r.bottom + 20
+                    });
+                }
+            });
+
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            manualForbiddenZones.forEach(zone => {
+                const leftPx = (zone.left / 100) * w;
+                const topPx = (zone.top / 100) * h;
+                const widthPx = (zone.width / 100) * w;
+                const heightPx = (zone.height / 100) * h;
+                rects.push({
+                    left: leftPx,
+                    top: topPx,
+                    right: leftPx + widthPx,
+                    bottom: topPx + heightPx
+                });
+            });
+            return rects;
+        }
+
+        function isInForbiddenZone(x, y, rects) {
+            for (let r of rects) {
+                if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function initGame() {
+            updateScale();
+            const forbiddenRects = getForbiddenRects();
+            let usedPositions = [];
+
+            for (let i = 0; i < TOTAL_SYMBOLS; i++) {
+                const el = document.createElement('div');
+                el.classList.add('symbol');
+                
+                const asset = customAssets[i % customAssets.length];
+                
+                // 這裡會生成圖片標籤，使用您的網址
+                el.innerHTML = `<img src="${asset.content}" draggable="false" alt="${asset.name}">`;
+
+                // 最佳位置演算法 + 避開文字
+                let bestCandidate = null;
+                let bestDistance = -1;
+                const attempts = 100; 
+
+                for (let j = 0; j < attempts; j++) {
+                    const c = getRandomPosition();
+                    
+                    if (isInForbiddenZone(c.x, c.y, forbiddenRects)) {
+                        continue;
+                    }
+
+                    let minDistToNeighbor = Infinity;
+                    if (usedPositions.length === 0) {
+                        minDistToNeighbor = Infinity;
+                    } else {
+                        for (let pos of usedPositions) {
+                            const d = Math.hypot(c.x - pos.x, c.y - pos.y);
+                            if (d < minDistToNeighbor) {
+                                minDistToNeighbor = d;
+                            }
+                        }
+                    }
+
+                    if (minDistToNeighbor > bestDistance) {
+                        bestDistance = minDistToNeighbor;
+                        bestCandidate = c;
+                    }
+                }
+                
+                if (!bestCandidate) bestCandidate = getRandomPosition();
+
+                usedPositions.push(bestCandidate);
+                el.style.left = bestCandidate.x + 'px';
+                el.style.top = bestCandidate.y + 'px';
+
+                const rot = Math.random() * 360;
+                el.style.transform = `translate(-50%, -50%) rotate(${rot}deg)`;
+                
+                const isTarget = i < TARGET_SYMBOLS_COUNT; 
+                board.appendChild(el);
+
+                symbolsData.push({
+                    id: i,
+                    element: el,
+                    x: bestCandidate.x,
+                    y: bestCandidate.y,
+                    isTarget: isTarget,
+                    found: false,
+                    baseRotation: rot
+                });
+            }
+        }
+
+        // 更新放大鏡與符號顯示狀態
+        function updateMagnifier(x, y) {
+            magnifier.style.left = x + 'px';
+            magnifier.style.top = y + 'px';
+            magnifier.style.display = 'flex'; 
+
+            const detectRadius = currentGlassSize * 0.4; 
+            
+            // 找出唯一且最近的符號
+            let closestSym = null;
+            let closestDist = Infinity;
+
+            symbolsData.forEach(sym => {
+                if (sym.found) return;
+
+                const dist = Math.hypot(x - sym.x, y - sym.y);
+                
+                if (dist < detectRadius + 20 && dist < closestDist) {
+                    closestDist = dist;
+                    closestSym = sym;
+                }
+            });
+
+            // 只有最近的顯示，其他隱藏
+            symbolsData.forEach(sym => {
+                if (sym.found) return;
+
+                if (sym === closestSym) {
+                    sym.element.classList.add('revealed');
+                    sym.element.style.transform = `translate(-50%, -50%) scale(1.3) rotate(0deg)`;
+                } else {
+                    sym.element.classList.remove('revealed');
+                    sym.element.style.transform = `translate(-50%, -50%) rotate(${sym.baseRotation}deg)`;
+                }
+            });
+        }
+
+        function handleInput(x, y) {
+            if (!isGameActive) return;
+
+            let clickedSymbol = null;
+            let minDist = Infinity;
+            const clickRadius = currentGlassSize * 0.35;
+
+            symbolsData.forEach(sym => {
+                const dist = Math.hypot(x - sym.x, y - sym.y);
+                if (dist < clickRadius) { 
+                    if (dist < minDist) {
+                        minDist = dist;
+                        clickedSymbol = sym;
+                    }
+                }
+            });
+
+            if (clickedSymbol) {
+                if (clickedSymbol.found) return;
+
+                if (clickedSymbol.isTarget) {
+                    triggerSuccess(clickedSymbol);
+                } else {
+                    triggerError();
+                }
+            }
+        }
+
+        function triggerSuccess(sym) {
+            sym.found = true;
+            sym.element.classList.add('found');
+            sym.element.classList.remove('revealed');
+            
+            // 成功特效
+            const flash = document.createElement('div');
+            flash.style.position = 'absolute';
+            flash.style.left = sym.x + 'px';
+            flash.style.top = sym.y + 'px';
+            flash.style.transform = 'translate(-50%, -50%)';
+            flash.style.width = '10px';
+            flash.style.height = '10px';
+            flash.style.borderRadius = '50%';
+            flash.style.backgroundColor = '#fff';
+            flash.style.boxShadow = '0 0 20px 10px #fff';
+            flash.style.opacity = '1';
+            flash.style.transition = 'all 0.5s';
+            flash.style.pointerEvents = 'none';
+            board.appendChild(flash);
+            
+            requestAnimationFrame(() => {
+                flash.style.opacity = '0';
+                flash.style.transform = 'translate(-50%, -50%) scale(5)';
+            });
+            setTimeout(() => flash.remove(), 500);
+
+            foundCount++;
+            statusEl.textContent = `找到線索: ${foundCount} / ${TARGET_SYMBOLS_COUNT}`;
+
+            if (foundCount === TARGET_SYMBOLS_COUNT) {
+                endGame();
+            }
+        }
+
+        function triggerError() {
+            magnifier.classList.add('error');
+            setTimeout(() => {
+                magnifier.classList.remove('error');
+            }, 500);
+        }
+
+        function endGame() {
+            isGameActive = false;
+            magnifier.style.display = 'none';
+            setTimeout(() => {
+                modal.style.display = 'flex';
+                modal.offsetHeight; 
+                modal.classList.add('show');
+            }, 1000);
+        }
+
+        // 監聽事件
+        window.addEventListener('mousemove', (e) => {
+            updateMagnifier(e.clientX, e.clientY);
+        });
+
+        window.addEventListener('click', (e) => {
+            handleInput(e.clientX, e.clientY);
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            const touch = e.touches[0];
+            updateMagnifier(touch.clientX, touch.clientY);
+        }, { passive: false });
+
+        window.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            updateMagnifier(touch.clientX, touch.clientY);
+        }, { passive: false });
+
+        window.addEventListener('touchend', (e) => {
+            const touch = e.changedTouches[0];
+            handleInput(touch.clientX, touch.clientY);
+        });
+
+        window.addEventListener('resize', () => {
+            if(isGameActive) {
+                updateScale();
+            }
+        });
+
+        // 啟動遊戲
+        initGame();
+
+    </script>
+</body>
+</html>

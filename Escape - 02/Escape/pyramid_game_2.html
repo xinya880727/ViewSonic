@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>古墓石碑：尋找失落的符號</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Noto+Serif+TC:wght@400;700&display=swap');
+
+        :root {
+            /* 基礎變數 - 這些會由 JS 動態調整 */
+            --glass-size: 120px; 
+            --stone-bg: #2c241b;
+            --stone-light: #3e3226;
+            
+            /* ★隱藏時完全透明 */
+            --symbol-hidden-opacity: 0;
+            
+            --ui-gold: #d4af37;
+            
+            /* ★符號大小 - 會由 JS 動態調整 */
+            --symbol-size: 30px; 
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1510;
+            font-family: 'Cinzel', 'Noto Serif TC', serif;
+            color: var(--ui-gold);
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none; /* 禁止手機滑動，專注遊戲 */
+        }
+
+        /* UI Layer */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            z-index: 100;
+            pointer-events: none;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            padding-bottom: 20px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.8rem;
+            letter-spacing: 2px;
+        }
+
+        #status {
+            font-size: 1.2rem;
+            margin-top: 5px;
+            color: #fff;
+        }
+
+        /* 針對電腦版的大螢幕調整文字大小 */
+        @media (min-width: 1024px) {
+            h1 { font-size: 3rem; }
+            #status { font-size: 1.8rem; }
+            #touch-hint { font-size: 1.5rem !important; bottom: 40px !important; }
+        }
+
+        /* Game Area */
+        #game-board {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: var(--stone-bg);
+            /* 產生石碑質感 */
+            background-image: 
+                radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 100%),
+                url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.15'/%3E%3C/svg%3E");
+            cursor: none; /* 隱藏游標 */
+        }
+
+        /* Symbols */
+        .symbol {
+            position: absolute;
+            width: var(--symbol-size);
+            height: var(--symbol-size);
+            transform: translate(-50%, -50%);
+            opacity: var(--symbol-hidden-opacity);
+            filter: grayscale(100%) blur(1px);
+            transition: opacity 0.1s ease, filter 0.2s ease, transform 0.2s ease;
+            pointer-events: none;
+            color: #8b7355;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .symbol svg {
+            width: 100%;
+            height: 100%;
+            fill: currentColor;
+            drop-shadow: 1px 1px 0px rgba(255,255,255,0.1), -1px -1px 0px rgba(0,0,0,0.5);
+        }
+
+        /* States for Symbols */
+        .symbol.revealed {
+            opacity: 1;
+            filter: grayscale(0%) blur(0px);
+            color: #e0cda7;
+            transform: translate(-50%, -50%) scale(1.2) rotate(0deg) !important; 
+            z-index: 60; 
+        }
+
+        .symbol.found {
+            opacity: 1 !important;
+            filter: grayscale(0%) !important;
+            color: #ffd700 !important;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+            transform: translate(-50%, -50%) scale(1.8) !important; 
+            z-index: 40; 
+        }
+        
+        /* =========================================
+           Magnifying Glass Structure 
+           ========================================= */
+        #magnifier {
+            position: absolute;
+            width: var(--glass-size);
+            height: var(--glass-size);
+            pointer-events: none; /* 關鍵：讓點擊可以穿透放大鏡點到下面的符號 */
+            transform: translate(-50%, -50%);
+            z-index: 100;
+            display: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* The Frame Image */
+        #magnifier-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain; 
+            z-index: 2; 
+            filter: drop-shadow(0 5px 10px rgba(0,0,0,0.5));
+        }
+
+        /* The "Lens" effect */
+        #magnifier-lens {
+            position: absolute;
+            width: 70%; 
+            height: 70%;
+            border-radius: 50%;
+            /* 正常狀態：玻璃反光 */
+            background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.2), rgba(255,255,255,0) 60%);
+            backdrop-filter: brightness(1.2) contrast(1.1);
+            z-index: 1; 
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            transition: background 0.2s, box-shadow 0.2s;
+        }
+
+        /* ★錯誤狀態 - 鏡片中間亮紅燈 */
+        #magnifier.error #magnifier-lens {
+            background: radial-gradient(circle, rgba(255, 0, 0, 0.8) 0%, rgba(255, 0, 0, 0) 70%);
+            box-shadow: 0 0 30px rgba(255, 0, 0, 0.8); 
+        }
+        
+        #magnifier.error {
+            animation: shake 0.3s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes shake {
+            10%, 90% { transform: translate(-52%, -50%); }
+            20%, 80% { transform: translate(-48%, -50%); }
+            30%, 50%, 70% { transform: translate(-54%, -50%); }
+            40%, 60% { transform: translate(-46%, -50%); }
+        }
+
+        /* Modal */
+        #modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 200;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+
+        #modal.show {
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, #1a1510, #2c241b);
+            border: 2px solid var(--ui-gold);
+            padding: 40px;
+            border-radius: 10px;
+            text-align: center;
+            max-width: 80%;
+            box-shadow: 0 0 50px rgba(212, 175, 55, 0.2);
+            transform: scale(0.8);
+            transition: transform 0.3s;
+        }
+
+        #modal.show .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-title {
+            color: var(--ui-gold);
+            font-size: 2rem;
+            margin-bottom: 20px;
+        }
+
+        .modal-text {
+            color: #ccc;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .btn {
+            background: var(--ui-gold);
+            color: #1a1510;
+            border: none;
+            padding: 12px 30px;
+            font-size: 1.2rem;
+            font-family: inherit;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: #fff;
+            transform: scale(1.05);
+        }
+
+        #touch-hint {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255,255,255,0.5);
+            font-size: 0.9rem;
+            pointer-events: none;
+            padding-top: 10px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="game-board">
+        <div id="magnifier">
+            <div id="magnifier-lens"></div>
+            <img id="magnifier-img" src="" alt="Magnifying Glass">
+        </div>
+    </div>
+
+    <!-- UI -->
+    <div id="ui-layer">
+        <h1>古墓壁畫</h1>
+        <div id="status">找到線索: 0 / 4</div>
+    </div>
+
+    <div id="touch-hint">拖動放大鏡尋找符號，點擊以確認</div>
+
+    <!-- Modal -->
+    <div id="modal">
+        <div class="modal-content">
+            <div class="modal-title">封印已解開！</div>
+            <div class="modal-text">你成功找出了四個關鍵符號。<br>石門緩緩打開，金色的光芒照亮了前方的道路...</div>
+            <button class="btn" onclick="location.reload()">重新挑戰</button>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        //  【設定區】
+        // ==========================================
+        const magnifierSettings = {
+            // ★ 修改這裡：將引號內的 "data:image/svg..." 換成您的圖片網址
+            image: "Escape_the_Pyramid_magnifier-01.svg",
+            
+            // ★注意：這裡是「基礎大小」(手機版)，電腦版會自動放大約 2 倍
+            baseSize: 120, 
+            showLensEffect: true
+        };
+
+        // ==========================================
+        //  【手動禁區設定】
+        // ==========================================
+        const manualForbiddenZones = [
+            // { left: 30, top: 40, width: 40, height: 20 }, 
+        ];
+
+        // ==========================================
+        //  【答案設定區：象形文字】
+        // ==========================================
+        const customAssets = [
+            // --- 正確答案 (前4個) ---
+            { name: "Ankh", type: 'svg', content: '<path d="M12 2a4 4 0 0 1 4 4c0 1.76-.83 3.32-2.12 4.28L14 11v3h4v2h-4v6h-2v-6H8v-2h4v-.72C10.83 9.32 10 7.76 10 6a4 4 0 0 1 2-4m0 2a2 2 0 0 0-2 2c0 1.11.89 2 2 2a2 2 0 0 0 2-2 2 2 0 0 0-2-2z"/>' }, 
+            { name: "Eye", type: 'svg', content: '<path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>' }, 
+            { name: "Djed", type: 'svg', content: '<path d="M10 2h4v2h-4z M8 5h8v2H8z M8 8h8v2H8z M8 11h8v2H8z M10 14h4v10h-4z"/>' }, 
+            { name: "Scepter", type: 'svg', content: '<path d="M12 2c-2 0-3 1-3 3s1 3 3 3h2v12l-2 2h4l-2-2V8h-2c-1 0-1-1-1-1s0-1 1-1h2c1 0 2-1 2-2s-1-2-2-2z"/>' }, 
+            
+            // --- 干擾項 ---
+            { name: "Scarab", type: 'svg', content: '<path d="M12 2c-2.2 0-4 1.8-4 4 0 1.5.8 2.8 2 3.5V13h4V9.5c1.2-.7 2-2 2-3.5 0-2.2-1.8-4-4-4zM7 11.5c-1.4 0-2.5 1.1-2.5 2.5v4c0 1.4 1.1 2.5 2.5 2.5h1.5v-9H7zm10 0h-1.5v9H17c1.4 0 2.5-1.1 2.5-2.5v-4c0-1.4-1.1-2.5-2.5-2.5zM10 21h4v-7h-4v7z"/>' }, 
+            { name: "Owl", type: 'svg', content: '<path d="M12 4c-4 0-6 4-6 8s2 8 6 8 6-4 6-8-2-8-6-8zm-2 6c.5 0 1 .5 1 1s-.5 1-1 1-1-.5-1-1 .5-1 1-1zm4 0c.5 0 1 .5 1 1s-.5 1-1 1-1-.5-1-1 .5-1 1-1z"/>' }, 
+            { name: "Water", type: 'svg', content: '<path d="M2 12l2.5-3 2.5 3 2.5-3 2.5 3 2.5-3 2.5 3 2.5-3 2.5 3"/>' }, 
+            { name: "Viper", type: 'svg', content: '<path d="M15 6c0-2.2-1.8-4-4-4S7 3.8 7 6v10c0 1.1-.9 2-2 2s-2-.9-2-2V8H1v8c0 2.2 1.8 4 4 4s4-1.8 4-4V6c0-1.1.9-2 2-2s2 .9 2 2v4h2V6z"/>' }, 
+            { name: "Mouth", type: 'svg', content: '<path d="M2 12c0 4 10 4 10 4s10 0 10-4-10-4-10-4-10 0-10 4z"/>' }, 
+            { name: "Reed", type: 'svg', content: '<path d="M12 2c-2 0-2 8-2 20h4c0-12 0-20-2-20z"/>' }, 
+            { name: "Leg", type: 'svg', content: '<path d="M6 4h6v12l4 4v2h-6l-4-4V4z"/>' }, 
+            { name: "Feather", type: 'svg', content: '<path d="M12 2C8 4 4 9 4 14c0 3.3 2.7 6 6 6h4c3.3 0 6-2.7 6-6 0-5-4-10-8-12zm2 16h-4v-2h4v2zm0-4h-4v-2h4v2zm0-4h-4V8h4v2z"/>' }, 
+            { name: "Sun", type: 'svg', content: '<path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 8c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3 3 3z M2 13h2 M20 13h2 M11 2v2 M11 20v2 M6.35 6.35l1.41 1.41 M16.24 16.24l1.41 1.41 M6.35 17.65l1.41-1.41 M16.24 7.76l1.41-1.41"/>' }, 
+            { name: "Basket", type: 'svg', content: '<path d="M2 12c2.5 0 2.5 4 5 4s2.5-4 5-4 2.5 4 5 4 2.5-4 5-4"/>' }, 
+        ];
+
+        // ==========================================
+        //  遊戲邏輯區
+        // ==========================================
+
+        const TOTAL_SYMBOLS = 20;
+        const TARGET_SYMBOLS_COUNT = 4;
+        
+        // ★基礎符號大小 30px，會隨螢幕放大
+        const BASE_SYMBOL_SIZE = 30; 
+        
+        let foundCount = 0;
+        let isGameActive = true;
+        let symbolsData = [];
+        
+        // 全局縮放比例
+        let currentScale = 1.0;
+        let currentGlassSize = 120; // 實際像素
+        let currentSymbolSize = 30; // 實際像素
+
+        const magnifier = document.getElementById('magnifier');
+        const magnifierImg = document.getElementById('magnifier-img');
+        const magnifierLens = document.getElementById('magnifier-lens');
+        const board = document.getElementById('game-board');
+        const statusEl = document.getElementById('status');
+        const modal = document.getElementById('modal');
+
+        // ★★★ 計算縮放比例 ★★★
+        function updateScale() {
+            const width = window.innerWidth;
+            
+            // 邏輯：如果寬度大於 1024px (通常是電腦)，就放大 2 倍
+            if (width >= 1024) {
+                currentScale = 2.0;
+            } else {
+                currentScale = 1.0;
+            }
+
+            // 計算實際大小
+            currentGlassSize = magnifierSettings.baseSize * currentScale;
+            currentSymbolSize = BASE_SYMBOL_SIZE * currentScale;
+
+            // 套用到 CSS 變數
+            document.documentElement.style.setProperty('--glass-size', currentGlassSize + 'px');
+            document.documentElement.style.setProperty('--symbol-size', currentSymbolSize + 'px');
+            
+            // 套用放大鏡圖片設定
+            magnifierImg.src = magnifierSettings.image;
+            if (!magnifierSettings.showLensEffect) {
+                magnifierLens.style.display = 'none';
+            }
+        }
+
+        function getRandomPosition() {
+            const padding = 60 * currentScale; // 邊界也要跟著縮放
+            return {
+                x: padding + Math.random() * (window.innerWidth - padding * 2),
+                y: padding + Math.random() * (window.innerHeight - padding * 2)
+            };
+        }
+
+        function getForbiddenRects() {
+            let rects = [];
+            const uiElements = [document.getElementById('ui-layer'), document.getElementById('touch-hint')];
+            uiElements.forEach(el => {
+                if(el) {
+                    const r = el.getBoundingClientRect();
+                    rects.push({
+                        left: r.left - 20,
+                        top: r.top - 20,
+                        right: r.right + 20,
+                        bottom: r.bottom + 20
+                    });
+                }
+            });
+
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            manualForbiddenZones.forEach(zone => {
+                const leftPx = (zone.left / 100) * w;
+                const topPx = (zone.top / 100) * h;
+                const widthPx = (zone.width / 100) * w;
+                const heightPx = (zone.height / 100) * h;
+                rects.push({
+                    left: leftPx,
+                    top: topPx,
+                    right: leftPx + widthPx,
+                    bottom: topPx + heightPx
+                });
+            });
+            return rects;
+        }
+
+        function isInForbiddenZone(x, y, rects) {
+            for (let r of rects) {
+                if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function initGame() {
+            // 先計算一次縮放
+            updateScale();
+            
+            const forbiddenRects = getForbiddenRects();
+            let usedPositions = [];
+
+            // 最小安全距離也要隨縮放調整，避免電腦版符號黏太近
+            const safeDistance = 150 * (currentScale * 0.8); // 稍微保守一點放大
+
+            for (let i = 0; i < TOTAL_SYMBOLS; i++) {
+                const el = document.createElement('div');
+                el.classList.add('symbol');
+                
+                const asset = customAssets[i % customAssets.length];
+                
+                if (asset.type === 'image') {
+                    el.innerHTML = `<img src="${asset.content}" draggable="false">`;
+                } else {
+                    el.innerHTML = `<svg viewBox="0 0 24 24">${asset.content}</svg>`;
+                }
+
+                // 最佳位置 + 避障演算法
+                let bestCandidate = null;
+                let bestDistance = -1;
+                const attempts = 100; 
+
+                for (let j = 0; j < attempts; j++) {
+                    const c = getRandomPosition();
+                    
+                    if (isInForbiddenZone(c.x, c.y, forbiddenRects)) {
+                        continue;
+                    }
+
+                    let minDistToNeighbor = Infinity;
+                    if (usedPositions.length === 0) {
+                        minDistToNeighbor = Infinity;
+                    } else {
+                        for (let pos of usedPositions) {
+                            const d = Math.hypot(c.x - pos.x, c.y - pos.y);
+                            if (d < minDistToNeighbor) {
+                                minDistToNeighbor = d;
+                            }
+                        }
+                    }
+
+                    if (minDistToNeighbor > bestDistance) {
+                        bestDistance = minDistToNeighbor;
+                        bestCandidate = c;
+                    }
+                }
+                
+                if (!bestCandidate) bestCandidate = getRandomPosition();
+
+                usedPositions.push(bestCandidate);
+                el.style.left = bestCandidate.x + 'px';
+                el.style.top = bestCandidate.y + 'px';
+
+                const rot = Math.random() * 360;
+                el.style.transform = `translate(-50%, -50%) rotate(${rot}deg)`;
+                
+                const isTarget = i < TARGET_SYMBOLS_COUNT; 
+                board.appendChild(el);
+
+                symbolsData.push({
+                    id: i,
+                    element: el,
+                    x: bestCandidate.x,
+                    y: bestCandidate.y,
+                    isTarget: isTarget,
+                    found: false,
+                    baseRotation: rot
+                });
+            }
+        }
+
+        function updateMagnifier(x, y) {
+            magnifier.style.left = x + 'px';
+            magnifier.style.top = y + 'px';
+            magnifier.style.display = 'flex'; 
+
+            // 偵測半徑 = 放大鏡的一半左右
+            const detectRadius = currentGlassSize * 0.4; 
+            
+            // ★邏輯：找出範圍內「最近」的一個
+            let closestSym = null;
+            let closestDist = Infinity;
+
+            symbolsData.forEach(sym => {
+                if (sym.found) return;
+
+                const dist = Math.hypot(x - sym.x, y - sym.y);
+                
+                // 必須在偵測半徑內
+                if (dist < detectRadius + 20 && dist < closestDist) {
+                    closestDist = dist;
+                    closestSym = sym;
+                }
+            });
+
+            // 套用狀態：只有最近的那個顯示，其他隱藏
+            symbolsData.forEach(sym => {
+                if (sym.found) return;
+
+                if (sym === closestSym) {
+                    sym.element.classList.add('revealed');
+                    sym.element.style.transform = `translate(-50%, -50%) scale(1.2) rotate(0deg)`;
+                } else {
+                    sym.element.classList.remove('revealed');
+                    sym.element.style.transform = `translate(-50%, -50%) rotate(${sym.baseRotation}deg)`;
+                }
+            });
+        }
+
+        function handleInput(x, y) {
+            if (!isGameActive) return;
+
+            let clickedSymbol = null;
+            let minDist = Infinity;
+            // 點擊判定範圍 (比顯示範圍小一點，要求精準)
+            const clickRadius = currentGlassSize * 0.35;
+
+            symbolsData.forEach(sym => {
+                const dist = Math.hypot(x - sym.x, y - sym.y);
+                if (dist < clickRadius) { 
+                    if (dist < minDist) {
+                        minDist = dist;
+                        clickedSymbol = sym;
+                    }
+                }
+            });
+
+            if (clickedSymbol) {
+                if (clickedSymbol.found) return;
+
+                if (clickedSymbol.isTarget) {
+                    triggerSuccess(clickedSymbol);
+                } else {
+                    triggerError();
+                }
+            }
+        }
+
+        function triggerSuccess(sym) {
+            sym.found = true;
+            sym.element.classList.add('found');
+            sym.element.classList.remove('revealed');
+            
+            const flash = document.createElement('div');
+            flash.style.position = 'absolute';
+            flash.style.left = sym.x + 'px';
+            flash.style.top = sym.y + 'px';
+            flash.style.transform = 'translate(-50%, -50%)';
+            flash.style.width = '10px';
+            flash.style.height = '10px';
+            flash.style.borderRadius = '50%';
+            flash.style.backgroundColor = '#fff';
+            flash.style.boxShadow = '0 0 20px 10px #fff';
+            flash.style.opacity = '1';
+            flash.style.transition = 'all 0.5s';
+            flash.style.pointerEvents = 'none';
+            board.appendChild(flash);
+            
+            requestAnimationFrame(() => {
+                flash.style.opacity = '0';
+                flash.style.transform = 'translate(-50%, -50%) scale(5)';
+            });
+            setTimeout(() => flash.remove(), 500);
+
+            foundCount++;
+            statusEl.textContent = `找到線索: ${foundCount} / ${TARGET_SYMBOLS_COUNT}`;
+
+            if (foundCount === TARGET_SYMBOLS_COUNT) {
+                endGame();
+            }
+        }
+
+        function triggerError() {
+            magnifier.classList.add('error');
+            setTimeout(() => {
+                magnifier.classList.remove('error');
+            }, 500);
+        }
+
+        function endGame() {
+            isGameActive = false;
+            magnifier.style.display = 'none';
+            setTimeout(() => {
+                modal.style.display = 'flex';
+                modal.offsetHeight; 
+                modal.classList.add('show');
+            }, 1000);
+        }
+
+        window.addEventListener('mousemove', (e) => {
+            updateMagnifier(e.clientX, e.clientY);
+        });
+
+        window.addEventListener('click', (e) => {
+            handleInput(e.clientX, e.clientY);
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            const touch = e.touches[0];
+            updateMagnifier(touch.clientX, touch.clientY);
+        }, { passive: false });
+
+        window.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            updateMagnifier(touch.clientX, touch.clientY);
+        }, { passive: false });
+
+        window.addEventListener('touchend', (e) => {
+            const touch = e.changedTouches[0];
+            handleInput(touch.clientX, touch.clientY);
+        });
+
+        // 視窗大小改變時重新計算比例 (例如旋轉手機，或調整視窗大小)
+        window.addEventListener('resize', () => {
+            if(isGameActive) {
+                updateScale();
+                // 注意：這裡不重新生成符號位置，只調整大小，以避免遊戲中斷
+                // 但如果視窗變動太大，可能需要 reload，視需求而定
+            }
+        });
+
+        initGame();
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,322 @@
+
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>法老 (手勢穩定版)</title>
+    
+    <!-- 引入 MediaPipe -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: "Microsoft JhengHei", sans-serif; user-select: none; }
+        
+        /* 遊戲容器 */
+        #game-container {
+            position: relative; width: 100vw; height: 100vh;
+            background-image: url('https://placehold.co/1920x1080/2b1d0e/5c4033?text=Ancient+Wall');
+            background-size: cover; background-position: center;
+        }
+
+        /* 探照燈遮罩 */
+        #flashlight-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle 150px at 50% 50%, transparent 0%, rgba(0,0,0,0.98) 100%);
+            z-index: 10; pointer-events: none;
+            transition: background 0.05s linear;
+        }
+
+        /* 隱藏物件 */
+        .hidden-item {
+            position: absolute; width: 100px; height: 130px;
+            background-size: contain; background-repeat: no-repeat; opacity: 0;
+            transition: opacity 0.2s, transform 0.2s; z-index: 5;
+        }
+        .hidden-item.revealed { opacity: 0.6; filter: grayscale(100%); }
+        .hidden-item.hovered { opacity: 1; filter: drop-shadow(0 0 20px gold) grayscale(0%); transform: scale(1.1); }
+        .hidden-item.collected { top: 20px !important; left: 90% !important; width: 50px !important; height: 50px !important; opacity: 0; transition: 1s; }
+
+        /* UI 層 */
+        #ui-layer { position: absolute; top: 20px; left: 20px; z-index: 20; color: gold; pointer-events: none; text-shadow: 2px 2px 4px #000; }
+        #inventory { position: absolute; top: 20px; right: 20px; display: flex; gap: 10px; z-index: 20; }
+        .slot { width: 50px; height: 50px; border: 2px dashed #666; border-radius: 50%; display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(0,0,0,0.5);}
+        .slot img { width: 80%; height: 80%; object-fit: contain; }
+
+        /* 訊息提示 */
+        #message-box {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); color: #fff; padding: 10px 30px; border-radius: 30px;
+            border: 1px solid gold; z-index: 30; font-size: 18px; display: none;
+        }
+
+        /* 開始與錯誤畫面 */
+        #start-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #111; color: gold; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 100;
+        }
+        button { 
+            padding: 15px 40px; font-size: 24px; background: gold; border: none; 
+            cursor: pointer; border-radius: 50px; margin-top: 20px; font-weight: bold;
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.4); transition: transform 0.1s;
+        }
+        button:active { transform: scale(0.95); }
+        button:disabled { background: #555; color: #888; cursor: not-allowed; }
+        
+        #error-log {
+            margin-top: 20px; padding: 15px; background: rgba(50, 0, 0, 0.8); 
+            border: 1px solid red; color: #ffaaaa; max-width: 80%; border-radius: 10px;
+            text-align: left; display: none;
+        }
+
+        /* 視訊元素：透明且置於底層，但保有尺寸 */
+        #input-video { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 640px; 
+            height: 480px; 
+            opacity: 0; 
+            z-index: -10; 
+        }
+
+        /* 視訊預覽 */
+        #camera-preview {
+            position: absolute; bottom: 10px; left: 10px; width: 160px; height: 120px;
+            border: 2px solid gold; z-index: 50; transform: scaleX(-1); opacity: 0.8; display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="start-screen">
+        <h1>法老的試煉 (手勢穩定版)</h1>
+        <p>請舉起手，使用食指移動光圈，捏合手指抓取</p>
+        <button id="start-btn" onclick="startGame()">啟動攝影機</button>
+        <div id="error-log"></div>
+    </div>
+
+    <div id="game-container">
+        <div id="flashlight-overlay"></div>
+        
+        <!-- 罐子物件 -->
+        <div class="hidden-item" id="item-1" style="top: 25%; left: 20%; background-image: url('https://placehold.co/100x130/gold/000?text=Imset');"></div>
+        <div class="hidden-item" id="item-2" style="top: 65%; left: 35%; background-image: url('https://placehold.co/100x130/gold/000?text=Hapi');"></div>
+        <div class="hidden-item" id="item-3" style="top: 35%; left: 75%; background-image: url('https://placehold.co/100x130/gold/000?text=Duamutef');"></div>
+        <div class="hidden-item" id="item-4" style="top: 75%; left: 85%; background-image: url('https://placehold.co/100x130/gold/000?text=Qebshenuf');"></div>
+    </div>
+
+    <div id="ui-layer">
+        <h2>手勢控制 | 食指移動 | 捏合抓取</h2>
+    </div>
+
+    <div id="inventory">
+        <div class="slot"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+    </div>
+    
+    <div id="message-box"></div>
+
+    <video id="input-video" playsinline muted autoplay></video>
+    <canvas id="camera-preview"></canvas>
+
+    <script>
+        const overlay = document.getElementById('flashlight-overlay');
+        const msgBox = document.getElementById('message-box');
+        const previewCanvas = document.getElementById('camera-preview');
+        const previewCtx = previewCanvas.getContext('2d');
+        const errorLog = document.getElementById('error-log');
+        const startBtn = document.getElementById('start-btn');
+        
+        let handX = 50, handY = 50;
+        let isPinching = false;
+        let collected = 0;
+        let hands;
+        let videoReady = false; // 新增旗標：確認視訊是否已準備好
+
+        // 顯示錯誤訊息的工具
+        function showError(title, detail) {
+            errorLog.style.display = 'block';
+            errorLog.innerHTML = `<strong>❌ ${title}</strong><br><small>${detail}</small>`;
+            startBtn.textContent = "重試";
+            startBtn.disabled = false;
+        }
+
+        async function startGame() {
+            startBtn.textContent = "系統初始化中...";
+            startBtn.disabled = true;
+            errorLog.style.display = 'none';
+
+            if (window.location.protocol === 'file:') {
+                showError("無法在檔案模式下執行", "請使用 VS Code Live Server 或上傳至 HTTPS 網站空間。");
+                return;
+            }
+
+            try {
+                // 1. 取得攝影機串流
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: {ideal: 640}, height: {ideal: 480}, facingMode: 'user' }
+                });
+
+                const video = document.getElementById('input-video');
+                video.srcObject = stream;
+                
+                // 2. 嚴格等待影片載入
+                startBtn.textContent = "等待影像訊號...";
+                
+                await new Promise((resolve, reject) => {
+                    // 設定超時，避免無限等待
+                    const timeout = setTimeout(() => {
+                        reject(new Error("等待攝影機影像超時"));
+                    }, 10000);
+
+                    video.onloadeddata = () => {
+                        clearTimeout(timeout);
+                        video.play().then(resolve).catch(reject);
+                    };
+                });
+
+                startBtn.textContent = "載入 AI 模型...";
+                
+                // 3. 載入 MediaPipe Hands
+                hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+                hands.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 0,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+
+                hands.onResults(onHandResults);
+                
+                await hands.initialize();
+                
+                // 成功啟動
+                videoReady = true;
+                document.getElementById('start-screen').style.display = 'none';
+                previewCanvas.style.display = 'block';
+                
+                cameraLoop();
+
+            } catch (err) {
+                console.error(err);
+                let msg = err.message;
+                if (err.name === 'NotAllowedError') msg = "請允許攝影機權限。";
+                if (err.name === 'NotFoundError') msg = "找不到攝影機。";
+                showError("啟動失敗", msg);
+            }
+        }
+
+        // 自定義循環 (加入更嚴格的檢查)
+        async function cameraLoop() {
+            const video = document.getElementById('input-video');
+            
+            // 只有當影片準備好、寬度大於0、且沒有暫停時才送出
+            if (videoReady && video.videoWidth > 0 && !video.paused) {
+                try {
+                    await hands.send({image: video});
+                } catch (e) {
+                    console.warn("AI Frame Skip:", e);
+                    // 忽略單一幀的錯誤，繼續執行
+                }
+            }
+            requestAnimationFrame(cameraLoop);
+        }
+
+        function onHandResults(results) {
+            // 繪製小視窗預覽
+            previewCtx.save();
+            previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+            previewCtx.drawImage(results.image, 0, 0, previewCanvas.width, previewCanvas.height);
+
+            if (results.multiHandLandmarks.length > 0) {
+                const lm = results.multiHandLandmarks[0];
+                drawConnectors(previewCtx, lm, HAND_CONNECTIONS, {color: '#0f0', lineWidth: 2});
+                drawLandmarks(previewCtx, lm, {color: '#f00', radius: 2});
+                
+                // 取得關鍵點
+                const index = lm[8]; 
+                const thumb = lm[4]; 
+                
+                // 座標轉換 (鏡像)
+                const targetX = (1 - index.x) * 100;
+                const targetY = index.y * 100;
+                
+                // 平滑移動
+                handX += (targetX - handX) * 0.3;
+                handY += (targetY - handY) * 0.3;
+
+                // 更新探照燈
+                overlay.style.background = `radial-gradient(circle 150px at ${handX}% ${handY}%, transparent 0%, rgba(0,0,0,0.98) 100%)`;
+
+                // 捏合偵測
+                const dist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
+                isPinching = dist < 0.08; 
+
+                if (isPinching) {
+                     overlay.style.background = `radial-gradient(circle 120px at ${handX}% ${handY}%, transparent 0%, rgba(0,0,0,0.98) 100%)`; 
+                }
+
+                checkInteraction();
+            }
+            previewCtx.restore();
+        }
+
+        function checkInteraction() {
+            const items = document.querySelectorAll('.hidden-item:not(.collected)');
+            
+            items.forEach(item => {
+                const rect = item.getBoundingClientRect();
+                const itemCx = rect.left + rect.width/2;
+                const itemCy = rect.top + rect.height/2;
+
+                const currentPxX = (handX/100) * window.innerWidth;
+                const currentPxY = (handY/100) * window.innerHeight;
+
+                const dist = Math.hypot(currentPxX - itemCx, currentPxY - itemCy);
+
+                if (dist < 150) item.classList.add('revealed');
+                else item.classList.remove('revealed');
+
+                if (dist < 60) {
+                    item.classList.add('hovered');
+                    if (isPinching) collectItem(item);
+                } else {
+                    item.classList.remove('hovered');
+                }
+            });
+        }
+
+        function collectItem(item) {
+            if(item.classList.contains('collected')) return;
+            item.classList.add('collected');
+            item.classList.remove('hovered');
+            
+            const slots = document.querySelectorAll('.slot');
+            const targetSlot = slots[collected];
+            const imgUrl = item.style.backgroundImage.slice(5, -2).replace(/"/g, "");
+            const img = document.createElement('img');
+            img.src = imgUrl;
+            
+            setTimeout(() => {
+                targetSlot.appendChild(img);
+                collected++;
+                showMessage(`收集到第 ${collected}/4 個罐子！`);
+                
+                if (collected === 4) {
+                    setTimeout(() => {
+                        alert("恭喜！法老的詛咒已解除！\n你獲得了逃脫的鑰匙。");
+                        location.reload();
+                    }, 500);
+                }
+            }, 300); 
+        }
+
+        function showMessage(text) {
+            msgBox.textContent = text;
+            msgBox.style.display = 'block';
+            setTimeout(() => { msgBox.style.display = 'none'; }, 2000);
+        }
+    </script>
+</body>
+</html>
