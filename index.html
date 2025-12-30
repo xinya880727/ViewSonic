@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>古埃及儀式：卡諾卜罈復位</title>
+    <!-- 引入 MediaPipe -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+    
+    <!-- 引入 Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary-gold: #D4AF37;
+            --secondary-gold: #C5A028;
+            --dark-bg: #1a0f0a;
+            --slot-bg: rgba(0, 0, 0, 0.4);
+            --success-green: #2ecc71;
+            --error-red: #e74c3c;
+        }
+
+        body {
+            margin: 0;
+            background-color: var(--dark-bg);
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            font-family: 'Cinzel', serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            color: var(--primary-gold);
+            user-select: none;
+        }
+
+        .bg-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        #ui-layer {
+            z-index: 100;
+            text-align: center;
+            pointer-events: none;
+            width: 100%;
+            position: absolute;
+            top: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 2rem;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.9);
+            letter-spacing: 2px;
+            pointer-events: none;
+        }
+
+        #instruction {
+            font-size: 1rem;
+            color: #ebd5b3;
+            background: rgba(0,0,0,0.6);
+            padding: 4px 12px;
+            border-radius: 20px;
+            display: inline-block;
+            pointer-events: none;
+        }
+
+        #game-board {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+        }
+
+        /* 驗證按鈕樣式 */
+        #check-btn {
+            position: absolute;
+            bottom: 115px; /* 您設定的位置 */
+            left: 49.6%;
+            transform: translateX(-50%);
+            
+            /* 預設樣式 */
+            background: linear-gradient(to bottom, #D4AF37, #AA8A26);
+            color: #1a0f0a;
+            border: 2px solid #fff;
+            padding: 10px 40px;
+            
+            font-family: 'Cinzel', serif;
+            font-size: 1.3rem;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            z-index: 50; 
+            pointer-events: auto;
+            
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            min-width: 200px;
+            min-height: 50px;
+        }
+
+        #check-btn:hover {
+            transform: translateX(-50%) scale(1.05);
+            filter: brightness(1.1);
+        }
+
+        #check-btn:active {
+            transform: translateX(-50%) scale(0.95);
+        }
+
+        .btn-icon {
+            width: 30px;
+            height: 30px;
+            object-fit: contain;
+            position: relative; 
+            z-index: 2; /* 確保 icon 在 GIF 上層 */
+        }
+
+        /* 按鈕疊加 GIF 樣式 */
+        .btn-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 70%;  /* 填滿按鈕 */
+            height: 70%; /* 填滿按鈕 */
+            object-fit: contain; /* 保持比例 */
+            pointer-events: none; /* 關鍵：讓點擊穿透圖片直接作用於按鈕 */
+            z-index: 3; /* 確保在最上層 */
+        }
+
+        /* 插槽樣式 */
+        .slot {
+            position: absolute;
+            border: 2px dashed rgba(212, 175, 55, 0.4);
+            border-radius: 10px;
+            background-color: rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            transition: all 0.3s ease;
+            box-sizing: border-box;
+        }
+        
+        .slot.custom-style {
+            border: none;
+            background-color: transparent;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center bottom;
+        }
+
+        /* 正確與錯誤狀態 */
+        .slot.correct {
+            
+        }
+        .slot.incorrect {
+                        animation: shake 0.5s;
+        }
+
+        /* 自訂圖片模式下的狀態 */
+        .slot.custom-style.correct {
+            background-color: transparent;
+            filter: drop-shadow(0 0 15px var(--success-green)); 
+        }
+        .slot.custom-style.incorrect {
+            background-color: transparent;
+            filter: drop-shadow(0 0 15px var(--error-red)); 
+            animation: shake 0.5s;
+        }
+
+        @keyframes shake {
+            0% { transform: translate(-50%, -50%) translateX(0); }
+            25% { transform: translate(-50%, -50%) translateX(-5px); }
+            50% { transform: translate(-50%, -50%) translateX(5px); }
+            75% { transform: translate(-50%, -50%) translateX(-5px); }
+            100% { transform: translate(-50%, -50%) translateX(0); }
+        }
+
+        .slot-label {
+            margin-bottom: -25px;
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.6);
+            z-index: 5;
+            text-shadow: 0 0 3px black;
+        }
+
+        /* 罐子物件 */
+        .jar {
+            width: 100px;
+            height: 150px;
+            position: absolute;
+            cursor: grab;
+            filter: drop-shadow(0 5px 8px rgba(0,0,0,0.6));
+            transition: transform 0.1s;
+            z-index: 20;
+            transform-origin: center center;
+            touch-action: none; 
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        .jar:active, .jar.grabbed {
+            cursor: grabbing;
+            z-index: 1000;
+            transform: scale(1.1);
+            filter: drop-shadow(0 20px 25px rgba(0,0,0,0.8));
+        }
+
+        .jar-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            pointer-events: none;
+        }
+
+        /* 罐子生成區 */
+        #jar-pool-area {
+            position: absolute; 
+            top: 40%; 
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%; 
+            height: 160px;
+            z-index: 15;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none; 
+        }
+
+        /* --- [修改] 攝影機視窗 RWD 設定 --- */
+        #webcam-container {
+            position: absolute;
+            right: 20px;
+            width: 180px;
+            height: 135px;
+            border: 2px solid var(--primary-gold);
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+            z-index: 200;
+            display: none;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.8);
+        }
+
+        /* 橫式 (Landscape) - 預設右上 */
+        @media (orientation: landscape) {
+            #webcam-container {
+                top: 20px;
+                bottom: auto;
+            }
+        }
+
+        /* 直式 (Portrait) - 改為右下 */
+        @media (orientation: portrait) {
+            #webcam-container {
+                top: auto;
+                bottom: 20px;
+            }
+        }
+
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        #gesture-cursor {
+            position: fixed;
+            top: 0; left: 0;
+            width: 24px; height: 24px;
+            border: 2px solid #00ff00;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 9999;
+            display: none;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        #gesture-cursor.pinching {
+            background-color: rgba(255, 0, 0, 0.6);
+            border-color: #ff0000;
+            box-shadow: 0 0 15px #ff0000;
+            width: 18px; height: 18px;
+        }
+
+        #win-screen {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 5000;
+            opacity: 0;
+            transition: opacity 1s;
+        }
+        
+        #win-screen.visible { opacity: 1; }
+
+        #win-screen h2 {
+            font-size: 3rem;
+            color: var(--primary-gold);
+            text-transform: uppercase;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        #win-screen button {
+            background: var(--primary-gold);
+            border: none;
+            padding: 12px 30px;
+            font-family: 'Cinzel', serif;
+            font-size: 1.2rem;
+            cursor: pointer;
+            margin-top: 10px;
+            border-radius: 4px;
+            font-weight: bold;
+            color: #1a0f0a;
+        }
+        
+        #win-screen button:hover { background: #fff; }
+
+        #loading {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #1a0f0a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 6000;
+            color: var(--primary-gold);
+            flex-direction: column;
+        }
+        .loader {
+            border: 3px solid #333;
+            border-top: 3px solid var(--primary-gold);
+            border-radius: 50%;
+            width: 30px; height: 30px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="bg-overlay"></div>
+
+    <div id="loading">
+        <div class="loader"></div>
+        <div id="loading-text">正在初始化儀式...</div>
+    </div>
+
+    <div id="ui-layer">
+        <h1>Ritual of the Canopic Jars</h1>
+        <div id="instruction">系統偵測中...</div>
+    </div>
+
+    <div id="game-board">
+        <!-- 插槽 -->
+        <div id="slots-layer">
+            <div class="slot" data-index="0"><div class="slot-label">I</div></div>
+            <div class="slot" data-index="1"><div class="slot-label">II</div></div>
+            <div class="slot" data-index="2"><div class="slot-label">III</div></div>
+            <div class="slot" data-index="3"><div class="slot-label">IV</div></div>
+        </div>
+
+        <!-- 罐子生成區 -->
+        <div id="jar-pool-area"></div>
+        
+        <!-- 驗證按鈕 -->
+        <button id="check-btn">Verify Ritual</button>
+    </div>
+
+    <div id="webcam-container">
+        <video id="webcam" autoplay playsinline></video>
+    </div>
+    <div id="gesture-cursor"></div>
+
+    <div id="win-screen">
+        <h2>Seal Broken</h2>
+        <p>封印已解除</p>
+        <button onclick="location.reload()">Replay</button>
+    </div>
+
+    <script type="module">
+        import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js";
+
+        // ==========================================
+        // --- [使用者設定區] ---
+        // ==========================================
+        
+        // 1. [背景設定]
+        const CUSTOM_BACKGROUND_URL = "Escape_the_Pyramid_09_FHD.png"; 
+
+        // 2. [罐子 (物件) 設定]
+        const useCustomImages = true; 
+        const userImagePaths = [
+            'Escape_the_Pyramid_canopic_jar01.svg', 
+            'Escape_the_Pyramid_canopic_jar02.svg', 
+            'Escape_the_Pyramid_canopic_jar03.svg', 
+            'Escape_the_Pyramid_canopic_jar04.svg'
+        ];
+
+        // 3. [插槽 (框框) 設定]
+        const useCustomSlotImages = true; 
+        const SLOT_WIDTH = 150;
+        const SLOT_HEIGHT = 180;
+        const SLOT_IMGS_NORMAL = [
+            'Escape_the_Pyramid_answer_frame02.svg', 
+            'Escape_the_Pyramid_answer_frame02.svg', 
+            'Escape_the_Pyramid_answer_frame02.svg', 
+            'Escape_the_Pyramid_answer_frame02.svg'
+        ];
+        const SLOT_IMG_CORRECT = "Escape_the_Pyramid_answer_frame02_correct.svg"; 
+        const SLOT_IMG_INCORRECT = "Escape_the_Pyramid_answer_frame02_wrong.svg"; 
+
+        // 4. [按鈕設定] 
+        // --- 請在此填入您的按鈕圖片 ---
+        // 若有值，將替換整個按鈕 (背景透明，文字隱藏)
+        const CUSTOM_BTN_IMAGE_URL = "Escape_the_Pyramid_button_frame.svg"; 
+        
+        // [新增] 疊加 GIF 圖案：請在此填入您的 GIF 檔名
+        const CUSTOM_BTN_OVERLAY_GIF = "Escape_the_Pyramid_next_button.gif"; 
+
+        // 按鈕圖示 (選填，會顯示在文字旁)
+        const CUSTOM_BTN_ICON_URL = ""; 
+        
+        // 設定按鈕尺寸 (單位: px)
+        const CUSTOM_BTN_WIDTH = 100; 
+        const CUSTOM_BTN_HEIGHT = 100; 
+
+        // 5. [位置調整]
+        const slotPositions = [
+            { top: 25, left: 26 }, 
+            { top: 25, left: 42 }, 
+            { top: 25, left: 58 }, 
+            { top: 25, left: 74 }  
+        ];
+
+        // 6. [音效設定] (請在下方引號內填入檔案路徑，例如 'bgm.mp3')
+        const AUDIO_BGM_URL = ""; 
+        const AUDIO_SUCCESS_URL = "correct.mp3"; 
+        const AUDIO_ERROR_URL = "wrong.mp3"; 
+
+        // ==========================================
+        // --- 系統預設資源 ---
+        // ==========================================
+        const svgIcons = [
+            `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 140"><path d="M20,130 C20,135 80,135 80,130 L85,60 C85,50 15,50 15,60 Z" fill="%23a0522d" stroke="%23D4AF37" stroke-width="3"/><circle cx="50" cy="35" r="25" fill="%23D4AF37"/><path d="M35,25 L45,35 L65,20" fill="none" stroke="black" stroke-width="2"/><text x="50" y="100" font-size="40" text-anchor="middle">🐶</text></svg>`,
+            `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 140"><path d="M20,130 C20,135 80,135 80,130 L85,60 C85,50 15,50 15,60 Z" fill="%23a0522d" stroke="%23D4AF37" stroke-width="3"/><circle cx="50" cy="35" r="25" fill="%23D4AF37"/><circle cx="40" cy="30" r="2" fill="black"/><circle cx="60" cy="30" r="2" fill="black"/><text x="50" y="100" font-size="40" text-anchor="middle">👤</text></svg>`,
+            `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 140"><path d="M20,130 C20,135 80,135 80,130 L85,60 C85,50 15,50 15,60 Z" fill="%23a0522d" stroke="%23D4AF37" stroke-width="3"/><circle cx="50" cy="35" r="25" fill="%23D4AF37"/><path d="M40,30 L60,30 L50,45 Z" fill="black"/><text x="50" y="100" font-size="40" text-anchor="middle">🦅</text></svg>`,
+            `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 140"><path d="M20,130 C20,135 80,135 80,130 L85,60 C85,50 15,50 15,60 Z" fill="%23a0522d" stroke="%23D4AF37" stroke-width="3"/><circle cx="50" cy="35" r="25" fill="%23D4AF37"/><path d="M30,30 Q50,50 70,30" fill="none" stroke="black" stroke-width="2"/><text x="50" y="100" font-size="40" text-anchor="middle">🐵</text></svg>`
+        ];
+
+        const finalImages = useCustomImages ? userImagePaths : svgIcons;
+
+        if (CUSTOM_BACKGROUND_URL) {
+            document.body.style.backgroundImage = `url('${CUSTOM_BACKGROUND_URL}')`;
+        }
+
+        // ==========================================
+        // --- 變數宣告 ---
+        // ==========================================
+        
+        const video = document.getElementById('webcam');
+        const webcamContainer = document.getElementById('webcam-container');
+        const cursor = document.getElementById('gesture-cursor');
+        const gameBoard = document.getElementById('game-board');
+        const jarPool = document.getElementById('jar-pool-area');
+        const slots = document.querySelectorAll('.slot');
+        const loadingScreen = document.getElementById('loading');
+        const loadingText = document.getElementById('loading-text');
+        const instructionText = document.getElementById('instruction');
+        const checkBtn = document.getElementById('check-btn');
+
+        let handLandmarker = undefined;
+        let lastVideoTime = -1;
+        let isWebcamActive = false; 
+
+        let grabbedJar = null;
+        let isPinching = false;
+        
+        let cursorX = 0, cursorY = 0;
+        let targetX = 0, targetY = 0;
+
+        let bgmAudio = null;
+        let successAudio = null;
+        let errorAudio = null;
+        let hasInteracted = false; 
+
+        // ==========================================
+        // --- 遊戲初始化 ---
+        // ==========================================
+
+        function initGame() {
+            initSlots();
+            initButton(); 
+            initAudio();
+
+            const indices = [0, 1, 2, 3];
+            indices.sort(() => Math.random() - 0.5); 
+
+            // 設定罐子間距
+            const spacingPercent = 0.16; 
+
+            indices.forEach((originalIndex, i) => {
+                const jar = document.createElement('div');
+                jar.classList.add('jar');
+                jar.dataset.id = originalIndex;
+                
+                const img = document.createElement('img');
+                img.src = finalImages[originalIndex];
+                img.classList.add('jar-img');
+                jar.appendChild(img);
+                
+                // [可調整] 初始排列高度 (0.4 = 40%) - 若修改此處，建議同步修改 resetJarPosition
+                const poolY = window.innerHeight * 0.40; 
+                
+                // 置中計算
+                const centerX = window.innerWidth / 2;
+                const spacing = window.innerWidth * spacingPercent;
+                const startX = centerX + (i - 1.5) * spacing - 50; 
+                
+                jar.style.left = startX + 'px';
+                jar.style.top = poolY + 'px';
+                
+                bindMouseEvents(jar);
+                gameBoard.appendChild(jar); 
+            });
+
+            checkBtn.addEventListener('click', checkAnswer);
+            checkBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+            checkBtn.addEventListener('touchstart', (e) => e.stopPropagation());
+            
+            document.body.addEventListener('click', startBgm, { once: true });
+            document.body.addEventListener('touchstart', startBgm, { once: true });
+        }
+
+        function initSlots() {
+            slots.forEach((slot, i) => {
+                if (slotPositions[i]) {
+                    slot.style.top = slotPositions[i].top + '%';
+                    slot.style.left = slotPositions[i].left + '%';
+                    slot.style.transform = 'translate(-50%, -50%)'; 
+                }
+
+                // 套用使用者定義的尺寸
+                slot.style.width = SLOT_WIDTH + 'px';
+                slot.style.height = SLOT_HEIGHT + 'px';
+
+                // 套用圖片
+                if (useCustomSlotImages) {
+                    slot.classList.add('custom-style');
+                    if (SLOT_IMGS_NORMAL[i]) {
+                        slot.style.backgroundImage = `url('${SLOT_IMGS_NORMAL[i]}')`;
+                    }
+                }
+            });
+        }
+
+        function initButton() {
+            if (CUSTOM_BTN_IMAGE_URL) {
+                checkBtn.style.background = `url('${CUSTOM_BTN_IMAGE_URL}') no-repeat center center`;
+                checkBtn.style.backgroundSize = 'contain';
+                checkBtn.style.backgroundColor = 'transparent'; // 確保背景透明
+                checkBtn.style.border = 'none'; 
+                checkBtn.style.boxShadow = 'none'; // 移除預設陰影
+                checkBtn.innerText = ""; // 隱藏文字
+                
+                // 設定尺寸
+                checkBtn.style.width = CUSTOM_BTN_WIDTH + 'px';
+                checkBtn.style.height = CUSTOM_BTN_HEIGHT + 'px';
+                
+                // 重置 min-width 避免被 CSS 影響
+                checkBtn.style.minWidth = '0';
+                checkBtn.style.minHeight = '0';
+            }
+            if (CUSTOM_BTN_ICON_URL) {
+                const icon = document.createElement('img');
+                icon.src = CUSTOM_BTN_ICON_URL;
+                icon.className = 'btn-icon';
+                checkBtn.prepend(icon); 
+            }
+            
+            // [新增] 載入疊加 GIF
+            if (CUSTOM_BTN_OVERLAY_GIF) {
+                const gif = document.createElement('img');
+                gif.src = CUSTOM_BTN_OVERLAY_GIF;
+                gif.className = 'btn-overlay';
+                checkBtn.appendChild(gif);
+            }
+        }
+
+        // ==========================================
+        // --- 音效處理 ---
+        // ==========================================
+
+        function initAudio() {
+            if (AUDIO_BGM_URL) {
+                bgmAudio = new Audio(AUDIO_BGM_URL);
+                bgmAudio.loop = true;
+                bgmAudio.volume = 0.5;
+            }
+            if (AUDIO_SUCCESS_URL) {
+                successAudio = new Audio(AUDIO_SUCCESS_URL);
+            }
+            if (AUDIO_ERROR_URL) {
+                errorAudio = new Audio(AUDIO_ERROR_URL);
+            }
+        }
+
+        function startBgm() {
+            if (bgmAudio && !hasInteracted) {
+                bgmAudio.play().catch(e => console.log("BGM play failed (waiting for interaction):", e));
+                hasInteracted = true;
+            }
+        }
+
+        function playSuccessSound() {
+            if (successAudio) {
+                successAudio.currentTime = 0;
+                successAudio.play();
+            }
+        }
+
+        function playErrorSound() {
+            if (errorAudio) {
+                errorAudio.currentTime = 0;
+                errorAudio.play();
+            }
+        }
+
+        // ==========================================
+        // --- AI & Webcam ---
+        // ==========================================
+
+        async function initVision() {
+            try {
+                loadingText.innerText = "載入 AI 模型中...";
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+                );
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numHands: 1
+                });
+                tryStartWebcam();
+            } catch (error) {
+                console.warn("AI 載入失敗", error);
+                activateMouseMode();
+            }
+        }
+
+        function tryStartWebcam() {
+            loadingText.innerText = "請求攝影機權限...";
+            
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error("Timeout")), 3000)
+            );
+            
+            const camPromise = navigator.mediaDevices.getUserMedia({ video: true });
+
+            Promise.race([camPromise, timeoutPromise])
+                .then((stream) => {
+                    video.srcObject = stream;
+                    video.addEventListener("loadeddata", () => {
+                        isWebcamActive = true;
+                        webcamContainer.style.display = 'block'; 
+                        instructionText.innerText = "手勢模式：食指移動，捏合抓取";
+                        loadingScreen.style.display = 'none';
+                        predictWebcam();
+                    });
+                })
+                .catch((err) => {
+                    console.warn("攝影機啟動失敗或逾時", err);
+                    activateMouseMode();
+                });
+        }
+
+        function activateMouseMode() {
+            isWebcamActive = false;
+            webcamContainer.style.display = 'none'; 
+            cursor.style.display = 'none';
+            loadingScreen.style.display = 'none';
+            instructionText.innerText = "滑鼠模式：拖曳罐子進行排列";
+        }
+
+        async function predictWebcam() {
+            if (!isWebcamActive) return;
+            let startTimeMs = performance.now();
+            if (lastVideoTime !== video.currentTime) {
+                lastVideoTime = video.currentTime;
+                const results = handLandmarker.detectForVideo(video, startTimeMs);
+
+                if (results.landmarks && results.landmarks.length > 0) {
+                    const landmarks = results.landmarks[0];
+                    const indexTip = landmarks[8];
+                    const thumbTip = landmarks[4];
+
+                    targetX = (1 - indexTip.x) * window.innerWidth;
+                    targetY = indexTip.y * window.innerHeight;
+
+                    cursorX += (targetX - cursorX) * 0.5;
+                    cursorY += (targetY - cursorY) * 0.5;
+                    updateCursorUI(cursorX, cursorY);
+
+                    const distance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+                    if (distance < 0.06) {
+                        if (!isPinching) {
+                            isPinching = true;
+                            cursor.classList.add('pinching');
+                            tryGrab(cursorX, cursorY);
+                        } else {
+                            handleDrag(cursorX, cursorY);
+                        }
+                    } else {
+                        if (isPinching) {
+                            isPinching = false;
+                            cursor.classList.remove('pinching');
+                            releaseGrab();
+                        }
+                    }
+                } else {
+                    cursor.style.display = 'none';
+                }
+            }
+            window.requestAnimationFrame(predictWebcam);
+        }
+
+        function updateCursorUI(x, y) {
+            cursor.style.display = 'block';
+            cursor.style.left = x + 'px';
+            cursor.style.top = y + 'px';
+        }
+
+        // ==========================================
+        // --- 拖曳與邏輯 ---
+        // ==========================================
+
+        function resetValidation() {
+            slots.forEach((slot, i) => {
+                slot.classList.remove('correct', 'incorrect');
+                // 重置圖片為一般狀態
+                if (useCustomSlotImages && SLOT_IMGS_NORMAL[i]) {
+                    slot.style.backgroundImage = `url('${SLOT_IMGS_NORMAL[i]}')`;
+                }
+            });
+        }
+
+        function tryGrab(x, y) {
+            resetValidation();
+            startBgm();
+
+            const elements = document.elementsFromPoint(x, y);
+            const jar = elements.find(el => el.classList.contains('jar'));
+            if (jar && !jar.classList.contains('locked')) {
+                grabbedJar = jar;
+                grabbedJar.classList.add('grabbed');
+                const rect = grabbedJar.getBoundingClientRect();
+                grabbedJar.offsetX = x - rect.left;
+                grabbedJar.offsetY = y - rect.top;
+            }
+        }
+
+        function handleDrag(x, y) {
+            if (grabbedJar) {
+                let newLeft = x - grabbedJar.offsetX;
+                let newTop = y - grabbedJar.offsetY;
+                grabbedJar.style.left = newLeft + 'px';
+                grabbedJar.style.top = newTop + 'px';
+            }
+        }
+
+        function releaseGrab() {
+            if (!grabbedJar) return;
+
+            // 1. 清除原記錄 (無論如何都先清除)
+            slots.forEach(s => {
+                if (s.dataset.filledBy === grabbedJar.dataset.id) {
+                    delete s.dataset.filledBy;
+                }
+            });
+
+            const jarRect = grabbedJar.getBoundingClientRect();
+            const jarCenterX = jarRect.left + jarRect.width/2;
+            const jarCenterY = jarRect.top + jarRect.height/2;
+            
+            let placed = false;
+            const boardRect = gameBoard.getBoundingClientRect();
+
+            // 2. 檢查新插槽
+            // 使用 for...of 迴圈以便在找到第一個重疊的插槽後 break，防止一次判定多個插槽
+            for (const slot of slots) {
+                const slotRect = slot.getBoundingClientRect();
+                
+                if (jarCenterX > slotRect.left && jarCenterX < slotRect.right &&
+                    jarCenterY > slotRect.top && jarCenterY < slotRect.bottom) {
+                    
+                    // --- 關鍵修正：檢查插槽是否已被佔用 ---
+                    if (slot.dataset.filledBy !== undefined) {
+                        const existingJarId = slot.dataset.filledBy;
+                        // 如果裡面有其他罐子，將其移走 (踢出)
+                        if (existingJarId !== grabbedJar.dataset.id) {
+                             const existingJar = document.querySelector(`.jar[data-id="${existingJarId}"]`);
+                             if (existingJar) {
+                                 resetJarPosition(existingJar); // 呼叫重置位置函式
+                             }
+                        }
+                    }
+
+                    // 開始吸附
+                    const centerX = slotRect.left + slotRect.width / 2;
+                    const centerY = slotRect.top + slotRect.height / 2;
+                    
+                    const finalLeft = (centerX - boardRect.left) - (grabbedJar.offsetWidth / 2);
+                    const finalTop = (centerY - boardRect.top) - (grabbedJar.offsetHeight / 2);
+
+                    grabbedJar.style.left = finalLeft + 'px';
+                    grabbedJar.style.top = finalTop + 'px';
+                    
+                    slot.dataset.filledBy = grabbedJar.dataset.id;
+                    placed = true;
+                    break; // 找到一個插槽就停止檢查
+                }
+            }
+
+            grabbedJar.classList.remove('grabbed');
+            grabbedJar = null;
+        }
+
+        function resetJarPosition(jar) {
+            // [可調整] 重置高度 (0.4 = 40%)
+            const poolY = window.innerHeight * 0.40;
+            const rangeW = window.innerWidth * 0.5; 
+            const minX = (window.innerWidth - rangeW) / 2;
+            const randomX = minX + Math.random() * rangeW - 50;
+            
+            jar.style.top = poolY + 'px';
+            jar.style.left = randomX + 'px';
+
+            slots.forEach(s => {
+                if (s.dataset.filledBy === jar.dataset.id) {
+                    delete s.dataset.filledBy;
+                }
+            });
+        }
+
+        // ==========================================
+        // --- 驗證邏輯 ---
+        // ==========================================
+
+        function checkAnswer() {
+            startBgm();
+
+            let correctCount = 0;
+            
+            slots.forEach((slot, index) => {
+                slot.classList.remove('correct', 'incorrect');
+                const filledBy = slot.dataset.filledBy;
+                
+                // 邏輯判定
+                let isCorrect = (filledBy !== undefined && filledBy == index);
+                
+                if (isCorrect) {
+                    slot.classList.add('correct');
+                    correctCount++;
+                    // 切換為答對圖片
+                    if (useCustomSlotImages && SLOT_IMG_CORRECT) {
+                        slot.style.backgroundImage = `url('${SLOT_IMG_CORRECT}')`;
+                    }
+                } else {
+                    slot.classList.add('incorrect');
+                    // 切換為答錯圖片
+                    if (useCustomSlotImages && SLOT_IMG_INCORRECT) {
+                        slot.style.backgroundImage = `url('${SLOT_IMG_INCORRECT}')`;
+                    }
+                }
+            });
+
+            if (correctCount === 4) {
+                playSuccessSound();
+                setTimeout(() => {
+                    document.getElementById('win-screen').style.display = 'flex';
+                    setTimeout(() => document.getElementById('win-screen').classList.add('visible'), 50);
+                    isWebcamActive = false; 
+                }, 800);
+            } else {
+                playErrorSound();
+            }
+        }
+
+        // ==========================================
+        // --- Mouse/Touch Events ---
+        // ==========================================
+
+        function bindMouseEvents(jar) {
+            jar.addEventListener('mousedown', onMouseDown);
+            jar.addEventListener('touchstart', onTouchStart, {passive: false});
+        }
+
+        function onMouseDown(e) {
+            resetValidation();
+            startBgm();
+            const jar = e.currentTarget;
+            if (jar.classList.contains('locked')) return;
+            grabbedJar = jar;
+            grabbedJar.classList.add('grabbed');
+            const rect = jar.getBoundingClientRect();
+            grabbedJar.offsetX = e.clientX - rect.left;
+            grabbedJar.offsetY = e.clientY - rect.top;
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        }
+        function onMouseMove(e) {
+            if (!grabbedJar) return;
+            handleDrag(e.clientX, e.clientY);
+        }
+        function onMouseUp() {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            releaseGrab();
+        }
+        function onTouchStart(e) {
+            resetValidation(); 
+            startBgm();
+            const jar = e.currentTarget;
+            e.preventDefault(); 
+            grabbedJar = jar;
+            grabbedJar.classList.add('grabbed');
+            const touch = e.touches[0];
+            const rect = jar.getBoundingClientRect();
+            grabbedJar.offsetX = touch.clientX - rect.left;
+            grabbedJar.offsetY = touch.clientY - rect.top;
+            document.addEventListener('touchmove', onTouchMove, {passive: false});
+            document.addEventListener('touchend', onTouchEnd);
+        }
+        function onTouchMove(e) {
+            if (!grabbedJar) return;
+            e.preventDefault();
+            const touch = e.touches[0];
+            handleDrag(touch.clientX, touch.clientY);
+        }
+        function onTouchEnd() {
+            document.removeEventListener('touchmove', onTouchMove);
+            document.removeEventListener('touchend', onTouchEnd);
+            releaseGrab();
+        }
+
+        window.onload = () => {
+            initGame();
+            initVision(); 
+        };
+
+    </script>
+</body>
+</html>
